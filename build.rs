@@ -1,15 +1,45 @@
-use std::{env, path::PathBuf};
+use std::{env, ffi::OsStr, path::PathBuf};
 
 fn main() {
     compile_lib();
     create_bindings();
 }
 
+const INCLUDES: &[&str] = &[
+    "./sdk-nrf/drivers/wifi/nrf700x/osal/fw_if/umac_if/inc/fw",
+    "./sdk-nrf/drivers/wifi/nrf700x/osal/fw_if/umac_if/inc",
+    "./sdk-nrf/drivers/wifi/nrf700x/osal/hw_if/hal/inc/fw",
+    "./sdk-nrf/drivers/wifi/nrf700x/osal/hw_if/hal/inc",
+    "./sdk-nrf/drivers/wifi/nrf700x/osal/os_if/inc",
+    "./sdk-nrf/drivers/wifi/nrf700x/osal/bus_if/bal/inc",
+    "./sdk-nrf/drivers/wifi/nrf700x/osal/bus_if/bus/qspi/inc",
+    "./sdk-nrf/drivers/wifi/nrf700x/osal/utils/inc"
+];
+
+const SOURCES: &[&str] = &[
+    "./sdk-nrf/drivers/wifi/nrf700x/osal/fw_if/umac_if/src",
+    "./sdk-nrf/drivers/wifi/nrf700x/osal/os_if/src",
+    "./sdk-nrf/drivers/wifi/nrf700x/osal/hw_if/hal/src",
+    "./sdk-nrf/drivers/wifi/nrf700x/osal/bus_if/bal/src",
+    "./sdk-nrf/drivers/wifi/nrf700x/osal/bus_if/bus/qspi/src",
+    "./sdk-nrf/drivers/wifi/nrf700x/osal/utils/src",
+];
+
 fn compile_lib() {
     cc::Build::new()
-        .file("./sdk-nrf/drivers/wifi/nrf700x/osal/os_if/src/osal.c")
+        .files(SOURCES.iter().map(|path|
+            std::fs::read_dir(path)
+                .unwrap()
+                .map(|f| f.unwrap())
+                .filter(|f| f.path().extension() == Some(OsStr::new("c")))
+                .map(|f| f.path()),
+        ).flatten())
         .define("CONFIG_NRF_WIFI_LOW_POWER", None)
-        .include("./sdk-nrf/drivers/wifi/nrf700x/osal/os_if/inc")
+        .define("CONFIG_NRF700X_MAX_TX_PENDING_QLEN", "1024")
+        .define("CONFIG_NRF700X_TX_MAX_DATA_SIZE", "1024")
+        .define("CONFIG_NRF700X_MAX_TX_TOKENS", "16")
+        .warnings(false)
+        .includes(INCLUDES)
         .compile("nrf700x");
 
     println!("cargo:rustc-link-lib=nrf700x");
@@ -30,6 +60,7 @@ fn create_bindings() {
         // included header files changed.
         .parse_callbacks(Box::new(bindgen::CargoCallbacks))
         .clang_arg("-I./sdk-nrf/drivers/wifi")
+        .clang_args(INCLUDES.iter().map(|include| format!("-I{include}")))
         .clang_arg("-DCONFIG_NRF_WIFI_LOW_POWER")
         .use_core()
         // Finish the builder and generate the bindings.

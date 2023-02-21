@@ -1,5 +1,5 @@
 [package]
-name = "nrf700x-bindings"
+name = "nrf700x-sys"
 version = "0.1.0"
 edition = "2021"
 
