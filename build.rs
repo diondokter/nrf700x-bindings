@@ -62,6 +62,9 @@ fn create_bindings() {
         .clang_arg("-I./sdk-nrf/drivers/wifi")
         .clang_args(INCLUDES.iter().map(|include| format!("-I{include}")))
         .clang_arg("-DCONFIG_NRF_WIFI_LOW_POWER")
+        .default_enum_style(bindgen::EnumVariation::Rust { non_exhaustive: false })
+        .bitfield_enum(".*_FLAGS")
+        .bitfield_enum(".*_flags")
         .use_core()
         // Finish the builder and generate the bindings.
         .generate()
