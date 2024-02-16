@@ -4,8 +4,8 @@
 #![deny(unused_must_use)]
 #![allow(async_fn_in_trait)]
 
-use core::mem::zeroed;
-use core::ptr::{addr_of, addr_of_mut, null_mut};
+use core::ffi::c_void;
+use core::ptr::addr_of_mut;
 
 use cortex_m_rt::exception;
 use defmt::*;
@@ -16,8 +16,11 @@ use embassy_nrf::spim::Spim;
 use embassy_nrf::{bind_interrupts, spim};
 use embassy_time::{Delay, Duration, Timer};
 use embedded_hal_bus::spi::ExclusiveDevice;
-use nrf700x_sys::nrf_wifi_fmac_priv;
 use {embassy_nrf as _, panic_probe as _};
+
+mod os;
+mod bus;
+mod alloc_impl;
 
 bind_interrupts!(struct Irqs {
     SERIAL0 => spim::InterruptHandler<embassy_nrf::peripherals::SERIAL0>;
@@ -36,6 +39,8 @@ async fn blink_task(led: AnyPin) -> ! {
 
 #[embassy_executor::main]
 async fn main(spawner: Spawner) {
+    alloc_impl::init_heap();
+
     info!("Hello World!");
     let config: embassy_nrf::config::Config = Default::default();
     let p = embassy_nrf::init(config);
@@ -75,21 +80,37 @@ async fn main(spawner: Spawner) {
     */
 
     unsafe {
-        // Must live for as long as the driver is used
-        let mut os_dev_ctx = OsDeviceContext {};
+        let mut data_config = nrf700x_sys::nrf_wifi_data_config_params {
+            rate_protection_type: 1,
+            aggregation: nrf700x_sys::NRF_WIFI_FEATURE_DISABLE as _,
+            wmm: nrf700x_sys::NRF_WIFI_FEATURE_DISABLE as _,
+            max_num_tx_agg_sessions: 8,
+            max_num_rx_agg_sessions: 8,
+            max_tx_aggregation: 16,
+            reorder_buf_size: 32,
+            max_rxampdu_size: nrf700x_sys::max_rx_ampdu_size::MAX_RX_AMPDU_SIZE_8KB as _,
+        };
+        let mut rx_buf_pools = nrf700x_sys::rx_buf_pool_params {
+            buf_sz: 2048,
+            num_bufs: 4,
+        };
+        let mut callbk_fns = nrf700x_sys::nrf_wifi_fmac_callbk_fns {
+            scan_start_callbk_fn: Some(scan_start_callbk_fn),
+            scan_done_callbk_fn: Some(scan_done_callbk_fn),
+            scan_abort_callbk_fn: Some(scan_abort_callbk_fn),
+            scan_res_callbk_fn: Some(scan_res_callbk_fn),
+            disp_scan_res_callbk_fn: Some(disp_scan_res_callbk_fn),
+        };
 
-        let mut fpriv: nrf_wifi_fmac_priv = zeroed();
-
-        let out = nrf700x_sys::nrf_wifi_fmac_dev_add(
-            addr_of_mut!(fpriv),
-            addr_of_mut!(os_dev_ctx).cast(),
+        let fpriv = nrf700x_sys::nrf_wifi_fmac_init(
+            addr_of_mut!(data_config),
+            addr_of_mut!(rx_buf_pools),
+            addr_of_mut!(callbk_fns),
         );
 
-        info!("Out: {}", out);
+        info!("fpriv: {}", fpriv);
     }
 }
-
-struct OsDeviceContext {}
 
 #[exception]
 unsafe fn HardFault(ef: &cortex_m_rt::ExceptionFrame) -> ! {
@@ -97,4 +118,49 @@ unsafe fn HardFault(ef: &cortex_m_rt::ExceptionFrame) -> ! {
     loop {
         cortex_m::asm::bkpt();
     }
+}
+
+unsafe extern "C" fn scan_start_callbk_fn(
+    _os_vif_ctx: *mut c_void,
+    _scan_start_event: *mut nrf700x_sys::nrf_wifi_umac_event_trigger_scan,
+    _event_len: u32,
+) {
+    info!("scan_start_callbk_fn");
+}
+
+unsafe extern "C" fn scan_done_callbk_fn(
+    _os_vif_ctx: *mut c_void,
+    _scan_done_event: *mut nrf700x_sys::nrf_wifi_umac_event_trigger_scan,
+    _event_len: u32,
+) {
+    info!("scan_done_callbk_fn");
+}
+
+/** Callback function to be called when a scan is aborted. */
+unsafe extern "C" fn scan_abort_callbk_fn(
+    _os_vif_ctx: *mut c_void,
+    _scan_done_event: *mut nrf700x_sys::nrf_wifi_umac_event_trigger_scan,
+    _event_len: u32,
+) {
+    info!("scan_abort_callbk_fn");
+}
+
+/** Callback function to be called when a scan result is received. */
+unsafe extern "C" fn scan_res_callbk_fn(
+    _os_vif_ctx: *mut c_void,
+    _scan_res: *mut nrf700x_sys::nrf_wifi_umac_event_new_scan_results,
+    _event_len: u32,
+    _more_res: bool,
+) {
+    info!("scan_res_callbk_fn");
+}
+
+/** Callback function to be called when a display scan result is received. */
+unsafe extern "C" fn disp_scan_res_callbk_fn(
+    _os_vif_ctx: *mut c_void,
+    _scan_res: *mut nrf700x_sys::nrf_wifi_umac_event_new_scan_display_results,
+    _event_len: u32,
+    _more_res: bool,
+) {
+    info!("disp_scan_res_callbk_fn");
 }
