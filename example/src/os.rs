@@ -2,9 +2,9 @@
 
 extern crate alloc;
 
-use core::mem::size_of;
+use core::{ffi::c_void, mem::{size_of, size_of_val}, ptr::null_mut, sync::atomic::AtomicBool};
 
-use alloc::alloc::Layout;
+use alloc::{alloc::Layout, boxed::Box};
 
 use defmt::{info, trace};
 use nrf700x_sys::{
@@ -281,37 +281,44 @@ unsafe extern "C" fn spi_cpy_to(
 }
 unsafe extern "C" fn spinlock_alloc() -> *mut core::ffi::c_void {
     trace!("Called OS spinlock_alloc");
-    todo!();
+    Box::into_raw(Box::new(AtomicBool::new(false))).cast()
 }
 unsafe extern "C" fn spinlock_free(lock: *mut core::ffi::c_void) {
     trace!("Called OS spinlock_free");
-    todo!();
+    drop(Box::<AtomicBool>::from_raw(lock.cast()));
 }
 unsafe extern "C" fn spinlock_init(lock: *mut core::ffi::c_void) {
     trace!("Called OS spinlock_init");
-    todo!();
+    (*lock.cast::<AtomicBool>()).store(false, core::sync::atomic::Ordering::SeqCst);
 }
 unsafe extern "C" fn spinlock_take(lock: *mut core::ffi::c_void) {
     trace!("Called OS spinlock_take");
-    todo!();
+    while !(*lock.cast::<AtomicBool>()).swap(true, core::sync::atomic::Ordering::SeqCst) {
+        core::hint::spin_loop();
+    }
 }
 unsafe extern "C" fn spinlock_rel(lock: *mut core::ffi::c_void) {
     trace!("Called OS spinlock_rel");
-    todo!();
+    (*lock.cast::<AtomicBool>()).store(false, core::sync::atomic::Ordering::SeqCst);
 }
 unsafe extern "C" fn spinlock_irq_take(
     lock: *mut core::ffi::c_void,
     flags: *mut core::ffi::c_ulong,
 ) {
     trace!("Called OS spinlock_irq_take");
-    todo!();
+    let restore_state = critical_section::acquire();
+    assert!(size_of_val(&restore_state) <= size_of::<core::ffi::c_ulong>());
+    *(flags.cast()) = restore_state;
+
+    spinlock_take(lock);
 }
 unsafe extern "C" fn spinlock_irq_rel(
     lock: *mut core::ffi::c_void,
     flags: *mut core::ffi::c_ulong,
 ) {
     trace!("Called OS spinlock_irq_rel");
-    todo!();
+    spinlock_rel(lock);
+    critical_section::release(*(flags.cast()));
 }
 unsafe extern "C" fn log_dbg(fmt: *const core::ffi::c_char, args: va_list) -> core::ffi::c_int {
     trace!("Called OS log_dbg");
@@ -327,70 +334,107 @@ unsafe extern "C" fn log_err(fmt: *const core::ffi::c_char, args: va_list) -> co
 }
 unsafe extern "C" fn llist_node_alloc() -> *mut core::ffi::c_void {
     trace!("Called OS llist_node_alloc");
-    todo!();
+    Box::into_raw(Box::new(LinkedListNode {
+        next: null_mut(),
+        data: null_mut(),
+    }))
+    .cast()
 }
 unsafe extern "C" fn llist_node_free(node: *mut core::ffi::c_void) {
     trace!("Called OS llist_node_free");
-    todo!();
+    drop(Box::from_raw(node.cast::<LinkedListNode>()));
 }
 unsafe extern "C" fn llist_node_data_get(node: *mut core::ffi::c_void) -> *mut core::ffi::c_void {
     trace!("Called OS llist_node_data_get");
-    todo!();
+    (*node.cast::<LinkedListNode>()).data
 }
 unsafe extern "C" fn llist_node_data_set(
     node: *mut core::ffi::c_void,
     data: *mut core::ffi::c_void,
 ) {
     trace!("Called OS llist_node_data_set");
-    todo!();
+    (*node.cast::<LinkedListNode>()).data = data;
 }
 unsafe extern "C" fn llist_alloc() -> *mut core::ffi::c_void {
     trace!("Called OS llist_alloc");
-    todo!();
+    Box::into_raw(Box::new(Option::<LinkedList>::None)).cast()
 }
 unsafe extern "C" fn llist_free(llist: *mut core::ffi::c_void) {
     trace!("Called OS llist_free");
-    todo!();
+    drop(Box::from_raw(llist.cast::<Option<LinkedList>>()));
 }
 unsafe extern "C" fn llist_init(llist: *mut core::ffi::c_void) {
     trace!("Called OS llist_init");
-    todo!();
+    *llist.cast::<Option<LinkedList>>() = Some(LinkedList {
+        head: null_mut(),
+        tail: null_mut(),
+        len: 0,
+    });
 }
 unsafe extern "C" fn llist_add_node_tail(
     llist: *mut core::ffi::c_void,
     llist_node: *mut core::ffi::c_void,
 ) {
     trace!("Called OS llist_add_node_tail");
-    todo!();
+    let list = (*llist.cast::<Option<LinkedList>>()).as_mut().unwrap();
+    (*list.tail).next = llist_node.cast();
+    list.tail = llist_node.cast();
+    list.len += 1;
 }
 unsafe extern "C" fn llist_add_node_head(
     llist: *mut core::ffi::c_void,
     llist_node: *mut core::ffi::c_void,
 ) {
     trace!("Called OS llist_add_node_head");
-    todo!();
+    let list = (*llist.cast::<Option<LinkedList>>()).as_mut().unwrap();
+    (*llist_node.cast::<LinkedListNode>()).next = list.head.cast();
+    list.head = llist_node.cast();
+    list.len += 1;
 }
 unsafe extern "C" fn llist_get_node_head(llist: *mut core::ffi::c_void) -> *mut core::ffi::c_void {
     trace!("Called OS llist_get_node_head");
-    todo!();
+    (*llist.cast::<Option<LinkedList>>())
+        .as_mut()
+        .unwrap()
+        .head
+        .cast()
 }
 unsafe extern "C" fn llist_get_node_nxt(
     llist: *mut core::ffi::c_void,
     llist_node: *mut core::ffi::c_void,
 ) -> *mut core::ffi::c_void {
     trace!("Called OS llist_get_node_nxt");
-    todo!();
+    (*llist_node.cast::<LinkedListNode>()).next.cast()
 }
 unsafe extern "C" fn llist_del_node(
     llist: *mut core::ffi::c_void,
     llist_node: *mut core::ffi::c_void,
 ) {
     trace!("Called OS llist_del_node");
-    todo!();
+    let current = llist_get_node_head(llist);
+
+    if current.is_null() {
+        unreachable!()
+    }
+
+    loop {
+        let next = llist_get_node_nxt(llist, current);
+
+        if next.is_null() {
+            unreachable!();
+        }
+
+        if next == llist_node {
+            let next_after = llist_get_node_nxt(llist, next);
+            (*current.cast::<LinkedListNode>()).next = next_after.cast();
+            (*llist.cast::<Option<LinkedList>>()).as_mut().unwrap().len -= 1;
+            return;
+        }
+    }
 }
 unsafe extern "C" fn llist_len(llist: *mut core::ffi::c_void) -> core::ffi::c_uint {
     trace!("Called OS llist_len");
-    todo!();
+    (*llist.cast::<Option<LinkedList>>()).as_mut().unwrap().len as _
 }
 unsafe extern "C" fn nbuf_alloc(size: core::ffi::c_uint) -> *mut core::ffi::c_void {
     trace!("Called OS nbuf_alloc");
@@ -442,6 +486,7 @@ unsafe extern "C" fn nbuf_get_priority(nbuf: *mut core::ffi::c_void) -> core::ff
     todo!();
 }
 unsafe extern "C" fn tasklet_alloc(type_: core::ffi::c_int) -> *mut core::ffi::c_void {
+    // Type is nrf_wifi_tasklet_type
     trace!("Called OS tasklet_alloc");
     todo!();
 }
@@ -661,4 +706,15 @@ unsafe extern "C" fn assert(
 unsafe extern "C" fn strlen(str_: *const core::ffi::c_void) -> core::ffi::c_uint {
     trace!("Called OS strlen");
     todo!();
+}
+
+struct LinkedList {
+    head: *mut LinkedListNode,
+    tail: *mut LinkedListNode,
+    len: usize,
+}
+
+struct LinkedListNode {
+    next: *mut LinkedListNode,
+    data: *mut c_void,
 }

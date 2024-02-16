@@ -1,6 +1,10 @@
 #![allow(unused_variables)]
 
+extern crate alloc;
+
+use alloc::boxed::Box;
 use defmt::{info, trace};
+use embedded_hal::spi::{Operation, SpiDevice};
 use nrf700x_sys::{nrf_wifi_bal_ops, nrf_wifi_osal_dma_dir, nrf_wifi_osal_priv, nrf_wifi_status};
 
 #[no_mangle]
@@ -32,8 +36,14 @@ unsafe extern "C" fn init(
         unsafe extern "C" fn(hal_ctx: *mut core::ffi::c_void) -> nrf_wifi_status,
     >,
 ) -> *mut core::ffi::c_void {
-    trace!("Called BUS init");
-    todo!();
+    trace!(
+        "Called BUS init. {}, {}, {}",
+        opriv,
+        cfg_params,
+        intr_callbk_fn
+    );
+
+    Box::into_raw(Box::new(Bus { intr_callbk_fn })).cast()
 }
 unsafe extern "C" fn deinit(bus_priv: *mut core::ffi::c_void) {
     trace!("Called BUS deinit");
@@ -108,4 +118,35 @@ unsafe extern "C" fn dma_unmap(
 ) -> core::ffi::c_ulong {
     trace!("Called BUS dma_unmap");
     todo!();
+}
+
+struct Bus {
+    intr_callbk_fn: core::option::Option<
+        unsafe extern "C" fn(hal_ctx: *mut core::ffi::c_void) -> nrf_wifi_status,
+    >,
+}
+
+pub type BusDeviceObject = *mut dyn BusDevice;
+
+pub trait BusDevice {
+    fn read(&mut self, addr: u32, buf: &mut [u8]);
+    fn write(&mut self, addr: u32, buf: &[u8]);
+}
+
+impl<T: SpiDevice> BusDevice for T {
+    fn read(&mut self, addr: u32, buf: &mut [u8]) {
+        self.transaction(&mut [
+            Operation::Write(&[0x0B, (addr >> 16) as u8, (addr >> 8) as u8, addr as u8, 0x00]),
+            Operation::Read(buf),
+        ])
+        .unwrap()
+    }
+
+    fn write(&mut self, addr: u32, buf: &[u8]) {
+        self.transaction(&mut [
+            Operation::Write(&[0x02, (addr >> 16) as u8 | 0x80, (addr >> 8) as u8, addr as u8]),
+            Operation::Write(buf),
+        ])
+        .unwrap()
+    }
 }

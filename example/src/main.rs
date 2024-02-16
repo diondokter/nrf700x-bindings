@@ -16,6 +16,8 @@ use embassy_nrf::spim::Spim;
 use embassy_nrf::{bind_interrupts, spim};
 use embassy_time::{Delay, Duration, Timer};
 use embedded_hal_bus::spi::ExclusiveDevice;
+use crate::bus::BusDeviceObject;
+
 use {embassy_nrf as _, panic_probe as _};
 
 mod os;
@@ -64,7 +66,7 @@ async fn main(spawner: Spawner) {
     config.frequency = spim::Frequency::M8;
     let spim = Spim::new(p.SERIAL0, Irqs, sck, dio1, dio0, config);
     let csn = Output::new(csn, Level::High, OutputDrive::HighDrive);
-    let spi = ExclusiveDevice::new(spim, csn, Delay);
+    let mut spi = ExclusiveDevice::new(spim, csn, Delay);
 
     /*
     // QSPI is not working well yet.
@@ -109,6 +111,8 @@ async fn main(spawner: Spawner) {
         );
 
         info!("fpriv: {}", fpriv);
+
+        nrf700x_sys::nrf_wifi_fmac_dev_add(fpriv, (&mut spi as BusDeviceObject).cast());
     }
 }
 

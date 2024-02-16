@@ -40,6 +40,7 @@ embedded-hal-async = "1.0.0"
 align-data = "0.1.0"
 num_enum = { version = "0.7.2", default-features = false }
 embedded-alloc = "0.5.1"
+critical-section = "1.1.2"
 
 [profile.dev]
 debug = 2
