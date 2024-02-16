@@ -1,0 +1,25 @@
+{
+    "configurations": [
+        {
+            "name": "Default",
+            "defines": [
+                "CONFIG_NRF700X_DATA_TX"
+            ],
+            "intelliSenseMode": "windows-msvc-x64",
+            "compilerPath": "C:\\Program Files\\Microsoft Visual Studio\\2022\\Community\\VC\\Tools\\MSVC\\14.34.31933\\bin\\Hostx64\\x64\\cl.exe",
+            "cStandard": "c17",
+            "cppStandard": "c++17",
+            "includePath": [
+                "./sdk-nrf/drivers/wifi/nrf700x/osal/fw_if/umac_if/inc/fw",
+                "./sdk-nrf/drivers/wifi/nrf700x/osal/fw_if/umac_if/inc",
+                "./sdk-nrf/drivers/wifi/nrf700x/osal/hw_if/hal/inc/fw",
+                "./sdk-nrf/drivers/wifi/nrf700x/osal/hw_if/hal/inc",
+                "./sdk-nrf/drivers/wifi/nrf700x/osal/os_if/inc",
+                "./sdk-nrf/drivers/wifi/nrf700x/osal/bus_if/bal/inc",
+                "./sdk-nrf/drivers/wifi/nrf700x/osal/bus_if/bus/qspi/inc",
+                "./sdk-nrf/drivers/wifi/nrf700x/osal/utils/inc"
+            ]
+        }
+    ],
+    "version": 4
+}

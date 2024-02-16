@@ -1,0 +1,16 @@
+{
+    "files.associations": {
+        "*.x.in": "linkerscript",
+        "*.x": "linkerscript",
+        "stdio.h": "c",
+        "host_rpu_umac_if.h": "c",
+        "xiosbase": "c",
+        "fmac_cmd.h": "c",
+        "queue.h": "c",
+        "osal_ops.h": "c"
+    },
+    "rust-analyzer.linkedProjects": [
+        "Cargo.toml",
+        "example/Cargo.toml"
+    ]
+}
