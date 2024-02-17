@@ -5,7 +5,7 @@ extern crate alloc;
 use alloc::boxed::Box;
 use defmt::{info, trace};
 use embedded_hal::spi::{Operation, SpiDevice};
-use nrf700x_sys::{nrf_wifi_bal_ops, nrf_wifi_osal_dma_dir, nrf_wifi_osal_priv, nrf_wifi_status};
+use nrf700x_sys::{nrf_wifi_bal_ops, nrf_wifi_osal_dma_dir, nrf_wifi_osal_priv, nrf_wifi_status, nrf_wifi_bal_dev_ctx};
 
 #[no_mangle]
 extern "C" fn get_bus_ops() -> *const nrf_wifi_bal_ops {
@@ -43,7 +43,7 @@ unsafe extern "C" fn init(
         intr_callbk_fn
     );
 
-    Box::into_raw(Box::new(Bus { intr_callbk_fn })).cast()
+    defmt::dbg!(Box::into_raw(Box::new(BalContext { intr_callbk_fn })).cast())
 }
 unsafe extern "C" fn deinit(bus_priv: *mut core::ffi::c_void) {
     trace!("Called BUS deinit");
@@ -53,8 +53,15 @@ unsafe extern "C" fn dev_add(
     bus_priv: *mut core::ffi::c_void,
     bal_dev_ctx: *mut core::ffi::c_void,
 ) -> *mut core::ffi::c_void {
-    trace!("Called BUS dev_add");
-    todo!();
+    trace!("Called BUS dev_add: {}, {}", bus_priv, bal_dev_ctx);
+
+    let bus_priv = bus_priv.cast::<BalContext>();
+    let bal_dev_ctx = bal_dev_ctx.cast::<nrf_wifi_bal_dev_ctx>();
+
+    defmt::warn!("{}", defmt::Debug2Format(&*bus_priv));
+    defmt::warn!("{}", defmt::Debug2Format(&*bal_dev_ctx));
+
+    defmt::dbg!(Box::into_raw(Box::new(BusContext { bal_dev_ctx })).cast())
 }
 unsafe extern "C" fn dev_rem(bus_dev_ctx: *mut core::ffi::c_void) {
     trace!("Called BUS dev_rem");
@@ -72,7 +79,7 @@ unsafe extern "C" fn read_word(
     bus_dev_ctx: *mut core::ffi::c_void,
     addr_offset: core::ffi::c_ulong,
 ) -> core::ffi::c_uint {
-    trace!("Called BUS read_word");
+    trace!("Called BUS read_word: {} {}", bus_dev_ctx, addr_offset);
     todo!();
 }
 unsafe extern "C" fn write_word(
@@ -120,10 +127,15 @@ unsafe extern "C" fn dma_unmap(
     todo!();
 }
 
-struct Bus {
+#[derive(Debug)]
+struct BalContext {
     intr_callbk_fn: core::option::Option<
         unsafe extern "C" fn(hal_ctx: *mut core::ffi::c_void) -> nrf_wifi_status,
     >,
+}
+
+struct BusContext {
+    bal_dev_ctx: *mut nrf_wifi_bal_dev_ctx,
 }
 
 pub type BusDeviceObject = *mut dyn BusDevice;

@@ -7,6 +7,7 @@
 use core::ffi::c_void;
 use core::ptr::addr_of_mut;
 
+use crate::bus::BusDeviceObject;
 use cortex_m_rt::exception;
 use defmt::*;
 use defmt_rtt as _; // global logger
@@ -16,17 +17,21 @@ use embassy_nrf::spim::Spim;
 use embassy_nrf::{bind_interrupts, spim};
 use embassy_time::{Delay, Duration, Timer};
 use embedded_hal_bus::spi::ExclusiveDevice;
-use crate::bus::BusDeviceObject;
 
 use {embassy_nrf as _, panic_probe as _};
 
-mod os;
-mod bus;
 mod alloc_impl;
+mod bus;
+mod os;
 
 bind_interrupts!(struct Irqs {
     SERIAL0 => spim::InterruptHandler<embassy_nrf::peripherals::SERIAL0>;
 });
+
+#[embassy_executor::task]
+async fn run_wifi_work_queue() -> ! {
+    os::run_work_queue().await
+}
 
 #[embassy_executor::task]
 async fn blink_task(led: AnyPin) -> ! {
@@ -47,6 +52,7 @@ async fn main(spawner: Spawner) {
     let config: embassy_nrf::config::Config = Default::default();
     let p = embassy_nrf::init(config);
     spawner.spawn(blink_task(p.P1_06.degrade())).unwrap();
+    spawner.spawn(run_wifi_work_queue()).unwrap();
 
     let sck = p.P0_17;
     let csn = p.P0_18;
@@ -112,13 +118,15 @@ async fn main(spawner: Spawner) {
 
         info!("fpriv: {}", fpriv);
 
-        nrf700x_sys::nrf_wifi_fmac_dev_add(fpriv, (&mut spi as BusDeviceObject).cast());
+        let os_dev_ctx = defmt::dbg!(&mut spi as BusDeviceObject).cast(); // This is wrong... But what then?
+
+        nrf700x_sys::nrf_wifi_fmac_dev_add(fpriv, os_dev_ctx);
     }
 }
 
 #[exception]
 unsafe fn HardFault(ef: &cortex_m_rt::ExceptionFrame) -> ! {
-    info!("Hardfault!: {}", defmt::Debug2Format(&ef));
+    error!("Hardfault!: {}", defmt::Debug2Format(&ef));
     loop {
         cortex_m::asm::bkpt();
     }
