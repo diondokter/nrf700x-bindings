@@ -1,9 +1,8 @@
-use std::{env, path::PathBuf};
-
 use glob::glob;
 
 fn main() {
     println!("cargo:rerun-if-changed=build.rs");
+    println!("cargo:rerun-if-changed=src/bindings.rs");
 
     create_bindings();
     compile_lib();
@@ -28,8 +27,13 @@ static C_FILES: &[&str] = &[
 ];
 
 fn compile_lib() {
-    cc::Build::new()
-        .files(C_FILES.into_iter().map(|p| {
+    let mut build = cc::Build::new();
+    
+    if cfg!(windows) {
+        build.compiler("clang");
+    }
+
+    build.files(C_FILES.into_iter().map(|p| {
             if p.starts_with("nrf700x") {
                 format!("./sdk-nrf/drivers/wifi/{p}")
             } else {
@@ -84,10 +88,7 @@ fn create_bindings() {
         // Unwrap the Result and panic on failure.
         .expect("Unable to generate bindings");
 
-    // Write the bindings to the $OUT_DIR/bindings.rs file.
-    let out_path = PathBuf::from(env::var("OUT_DIR").unwrap());
-
     bindings
-        .write_to_file(out_path.join("bindings.rs"))
+        .write_to_file("./src/bindings.rs")
         .expect("Couldn't write bindings!");
 }
