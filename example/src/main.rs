@@ -9,7 +9,6 @@ use core::ptr::addr_of_mut;
 
 use crate::bus::BusDeviceObject;
 use cortex_m_rt::exception;
-use defmt::*;
 use defmt_rtt as _; // global logger
 use embassy_executor::Spawner;
 use embassy_nrf::gpio::{AnyPin, Input, Level, Output, OutputDrive, Pin, Pull};
@@ -17,6 +16,7 @@ use embassy_nrf::spim::Spim;
 use embassy_nrf::{bind_interrupts, spim};
 use embassy_time::{Delay, Duration, Timer};
 use embedded_hal_bus::spi::ExclusiveDevice;
+use nrf700x_sys::{nrf_wifi_fmac_fw_info, nrf_wifi_fw_info};
 
 use {embassy_nrf as _, panic_probe as _};
 
@@ -48,7 +48,7 @@ async fn blink_task(led: AnyPin) -> ! {
 async fn main(spawner: Spawner) {
     alloc_impl::init_heap();
 
-    info!("Hello World!");
+    defmt::info!("Hello World!");
     let config: embassy_nrf::config::Config = Default::default();
     let p = embassy_nrf::init(config);
     spawner.spawn(blink_task(p.P1_06.degrade())).unwrap();
@@ -72,7 +72,8 @@ async fn main(spawner: Spawner) {
     config.frequency = spim::Frequency::M8;
     let spim = Spim::new(p.SERIAL0, Irqs, sck, dio1, dio0, config);
     let csn = Output::new(csn, Level::High, OutputDrive::HighDrive);
-    let mut spi = ExclusiveDevice::new(spim, csn, Delay);
+    let spi: BusDeviceObject =
+        static_cell::make_static!(ExclusiveDevice::new(spim, csn, Delay));
 
     /*
     // QSPI is not working well yet.
@@ -92,16 +93,26 @@ async fn main(spawner: Spawner) {
             rate_protection_type: 1,
             aggregation: nrf700x_sys::NRF_WIFI_FEATURE_DISABLE as _,
             wmm: nrf700x_sys::NRF_WIFI_FEATURE_DISABLE as _,
-            max_num_tx_agg_sessions: 8,
-            max_num_rx_agg_sessions: 8,
+            max_num_tx_agg_sessions: 4,
+            max_num_rx_agg_sessions: 4,
             max_tx_aggregation: 16,
-            reorder_buf_size: 32,
+            reorder_buf_size: 1,
             max_rxampdu_size: nrf700x_sys::max_rx_ampdu_size::MAX_RX_AMPDU_SIZE_8KB as _,
         };
-        let mut rx_buf_pools = nrf700x_sys::rx_buf_pool_params {
-            buf_sz: 2048,
-            num_bufs: 4,
-        };
+        let mut rx_buf_pools: [nrf700x_sys::rx_buf_pool_params; 3] = [
+            nrf700x_sys::rx_buf_pool_params {
+                buf_sz: 2048,
+                num_bufs: 2,
+            },
+            nrf700x_sys::rx_buf_pool_params {
+                buf_sz: 2048,
+                num_bufs: 2,
+            },
+            nrf700x_sys::rx_buf_pool_params {
+                buf_sz: 2048,
+                num_bufs: 2,
+            },
+        ];
         let mut callbk_fns = nrf700x_sys::nrf_wifi_fmac_callbk_fns {
             scan_start_callbk_fn: Some(scan_start_callbk_fn),
             scan_done_callbk_fn: Some(scan_done_callbk_fn),
@@ -112,21 +123,80 @@ async fn main(spawner: Spawner) {
 
         let fpriv = nrf700x_sys::nrf_wifi_fmac_init(
             addr_of_mut!(data_config),
-            addr_of_mut!(rx_buf_pools),
+            addr_of_mut!(rx_buf_pools[0]),
             addr_of_mut!(callbk_fns),
         );
 
-        info!("fpriv: {}", fpriv);
+        defmt::info!("fpriv: {}", fpriv);
 
-        let os_dev_ctx = defmt::dbg!(&mut spi as BusDeviceObject).cast(); // This is wrong... But what then?
+        let mut os_ctx = OsContext { bus: spi };
 
-        nrf700x_sys::nrf_wifi_fmac_dev_add(fpriv, os_dev_ctx);
+        defmt::info!("os_ctx: {}", (&mut os_ctx) as *mut OsContext);
+
+        let fmac_dev_ctx =
+            nrf700x_sys::nrf_wifi_fmac_dev_add(fpriv, ((&mut os_ctx) as *mut OsContext).cast());
+
+        defmt::info!("fmac_dev_ctx: {}", (&mut os_ctx) as *mut OsContext);
+
+        let mut version = 0u32;
+        if nrf700x_sys::nrf_wifi_fmac_ver_get(fmac_dev_ctx, &mut version as *mut _).failed() {
+            defmt::error!("fmac version is error");
+        } else {
+            defmt::info!("fmac version is {}", version);
+        }
+
+        let mut fw_info = nrf_wifi_fmac_fw_info {
+            lmac_patch_pri: nrf_wifi_fw_info {
+                data: nrf700x_sys::nrf_wifi_lmac_patch_pri_bimg
+                    .as_ptr()
+                    .cast_mut()
+                    .cast(),
+                size: nrf700x_sys::nrf_wifi_lmac_patch_pri_bimg.len() as _,
+            },
+            lmac_patch_sec: nrf_wifi_fw_info {
+                data: nrf700x_sys::nrf_wifi_lmac_patch_sec_bin
+                    .as_ptr()
+                    .cast_mut()
+                    .cast(),
+                size: nrf700x_sys::nrf_wifi_lmac_patch_sec_bin.len() as _,
+            },
+            umac_patch_pri: nrf_wifi_fw_info {
+                data: nrf700x_sys::nrf_wifi_umac_patch_pri_bimg
+                    .as_ptr()
+                    .cast_mut()
+                    .cast(),
+                size: nrf700x_sys::nrf_wifi_umac_patch_pri_bimg.len() as _,
+            },
+            umac_patch_sec: nrf_wifi_fw_info {
+                data: nrf700x_sys::nrf_wifi_umac_patch_sec_bin
+                    .as_ptr()
+                    .cast_mut()
+                    .cast(),
+                size: nrf700x_sys::nrf_wifi_umac_patch_sec_bin.len() as _,
+            },
+        };
+
+        if nrf700x_sys::nrf_wifi_fmac_fw_load(fmac_dev_ctx, &mut fw_info as *mut _).failed() {
+            defmt::error!("Failed to load fw patches!");
+        }
+
+        let mut version = 0u32;
+        if nrf700x_sys::nrf_wifi_fmac_ver_get(fmac_dev_ctx, &mut version as *mut _).failed() {
+            defmt::error!("fmac version is error");
+        } else {
+            defmt::info!("fmac version is {}", version);
+        }
+
     }
+}
+
+struct OsContext {
+    bus: BusDeviceObject,
 }
 
 #[exception]
 unsafe fn HardFault(ef: &cortex_m_rt::ExceptionFrame) -> ! {
-    error!("Hardfault!: {}", defmt::Debug2Format(&ef));
+    defmt::error!("Hardfault!: {}", defmt::Debug2Format(&ef));
     loop {
         cortex_m::asm::bkpt();
     }
@@ -137,7 +207,7 @@ unsafe extern "C" fn scan_start_callbk_fn(
     _scan_start_event: *mut nrf700x_sys::nrf_wifi_umac_event_trigger_scan,
     _event_len: u32,
 ) {
-    info!("scan_start_callbk_fn");
+    defmt::info!("scan_start_callbk_fn");
 }
 
 unsafe extern "C" fn scan_done_callbk_fn(
@@ -145,7 +215,7 @@ unsafe extern "C" fn scan_done_callbk_fn(
     _scan_done_event: *mut nrf700x_sys::nrf_wifi_umac_event_trigger_scan,
     _event_len: u32,
 ) {
-    info!("scan_done_callbk_fn");
+    defmt::info!("scan_done_callbk_fn");
 }
 
 /** Callback function to be called when a scan is aborted. */
@@ -154,7 +224,7 @@ unsafe extern "C" fn scan_abort_callbk_fn(
     _scan_done_event: *mut nrf700x_sys::nrf_wifi_umac_event_trigger_scan,
     _event_len: u32,
 ) {
-    info!("scan_abort_callbk_fn");
+    defmt::info!("scan_abort_callbk_fn");
 }
 
 /** Callback function to be called when a scan result is received. */
@@ -164,7 +234,7 @@ unsafe extern "C" fn scan_res_callbk_fn(
     _event_len: u32,
     _more_res: bool,
 ) {
-    info!("scan_res_callbk_fn");
+    defmt::info!("scan_res_callbk_fn");
 }
 
 /** Callback function to be called when a display scan result is received. */
@@ -174,5 +244,5 @@ unsafe extern "C" fn disp_scan_res_callbk_fn(
     _event_len: u32,
     _more_res: bool,
 ) {
-    info!("disp_scan_res_callbk_fn");
+    defmt::info!("disp_scan_res_callbk_fn");
 }

@@ -762,6 +762,7 @@ pub const NRF_WIFI_FMAC_STATS_RECV_TIMEOUT: u32 = 50;
 pub const NRF_WIFI_FMAC_PS_CONF_EVNT_RECV_TIMEOUT: u32 = 50;
 pub const HOST_PKTRAM_BB_START: u32 = 46137344;
 pub const HOST_PKTRAM_BB_LEN: u32 = 4194304;
+pub const MAX_HAL_RPU_READY_WAIT: u32 = 1000000;
 pub type va_list = u32;
 pub type __gnuc_va_list = u32;
 pub type wchar_t = ::core::ffi::c_uint;
@@ -23451,9 +23452,810 @@ fn bindgen_test_layout_nrf_wifi_bal_dev_ctx() {
         )
     );
 }
-#[doc = " Handle to the HAL layer."]
+extern "C" {
+    #[doc = " nrf_wifi_bal_init() - Initialize the BAL layer.\n\n @intr_callbk_fn: Pointer to the callback function which the user of this\n                  layer needs to implement to handle interrupts from the\n                  RPU.\n\n This API is used to initialize the BAL layer and is expected to be called\n before using the BAL layer. This API returns a pointer to the BAL context\n which might need to be passed to further API calls.\n\n Returns: Pointer to instance of BAL layer context."]
+    pub fn nrf_wifi_bal_init(
+        opriv: *mut nrf_wifi_osal_priv,
+        cfg_params: *mut nrf_wifi_bal_cfg_params,
+        intr_callbk_fn: ::core::option::Option<
+            unsafe extern "C" fn(hal_ctx: *mut ::core::ffi::c_void) -> nrf_wifi_status,
+        >,
+    ) -> *mut nrf_wifi_bal_priv;
+}
+extern "C" {
+    #[doc = " nrf_wifi_bal_deinit() - Deinitialize the BAL layer.\n @bpriv: Pointer to the BAL layer context returned by the\n         @nrf_wifi_bal_init API.\n\n This API is used to deinitialize the BAL layer and is expected to be called\n after done using the BAL layer.\n\n Returns: None."]
+    pub fn nrf_wifi_bal_deinit(bpriv: *mut nrf_wifi_bal_priv);
+}
+extern "C" {
+    pub fn nrf_wifi_bal_dev_add(
+        bpriv: *mut nrf_wifi_bal_priv,
+        hal_dev_ctx: *mut ::core::ffi::c_void,
+    ) -> *mut nrf_wifi_bal_dev_ctx;
+}
+extern "C" {
+    pub fn nrf_wifi_bal_dev_rem(bal_dev_ctx: *mut nrf_wifi_bal_dev_ctx);
+}
+extern "C" {
+    pub fn nrf_wifi_bal_dev_init(bal_dev_ctx: *mut nrf_wifi_bal_dev_ctx) -> nrf_wifi_status;
+}
+extern "C" {
+    pub fn nrf_wifi_bal_dev_deinit(bal_dev_ctx: *mut nrf_wifi_bal_dev_ctx);
+}
+extern "C" {
+    pub fn nrf_wifi_bal_read_word(
+        ctx: *mut ::core::ffi::c_void,
+        addr_offset: ::core::ffi::c_ulong,
+    ) -> ::core::ffi::c_uint;
+}
+extern "C" {
+    pub fn nrf_wifi_bal_write_word(
+        ctx: *mut ::core::ffi::c_void,
+        addr_offset: ::core::ffi::c_ulong,
+        val: ::core::ffi::c_uint,
+    );
+}
+extern "C" {
+    pub fn nrf_wifi_bal_read_block(
+        ctx: *mut ::core::ffi::c_void,
+        dest_addr: *mut ::core::ffi::c_void,
+        src_addr_offset: ::core::ffi::c_ulong,
+        len: usize,
+    );
+}
+extern "C" {
+    pub fn nrf_wifi_bal_write_block(
+        ctx: *mut ::core::ffi::c_void,
+        dest_addr_offset: ::core::ffi::c_ulong,
+        src_addr: *const ::core::ffi::c_void,
+        len: usize,
+    );
+}
+extern "C" {
+    pub fn nrf_wifi_bal_dma_map(
+        ctx: *mut ::core::ffi::c_void,
+        virt_addr: ::core::ffi::c_ulong,
+        len: usize,
+        dma_dir: nrf_wifi_osal_dma_dir,
+    ) -> ::core::ffi::c_ulong;
+}
+extern "C" {
+    pub fn nrf_wifi_bal_dma_unmap(
+        ctx: *mut ::core::ffi::c_void,
+        phy_addr: ::core::ffi::c_ulong,
+        len: usize,
+        dma_dir: nrf_wifi_osal_dma_dir,
+    ) -> ::core::ffi::c_ulong;
+}
+extern "C" {
+    pub fn nrf_wifi_bal_bus_access_rec_enab(ctx: *mut ::core::ffi::c_void);
+}
+extern "C" {
+    pub fn nrf_wifi_bal_bus_access_rec_disab(ctx: *mut ::core::ffi::c_void);
+}
+extern "C" {
+    pub fn nrf_wifi_bal_bus_access_cnt_print(ctx: *mut ::core::ffi::c_void);
+}
+#[repr(u32)]
+#[derive(Debug, Copy, Clone, Hash, PartialEq, Eq)]
+pub enum RPU_PROC_TYPE {
+    RPU_PROC_TYPE_MCU_LMAC = 0,
+    RPU_PROC_TYPE_MCU_UMAC = 1,
+    RPU_PROC_TYPE_MAX = 2,
+}
+#[repr(u32)]
+#[derive(Debug, Copy, Clone, Hash, PartialEq, Eq)]
+pub enum NRF_WIFI_REGION_TYPE {
+    NRF_WIFI_REGION_TYPE_GRAM = 0,
+    NRF_WIFI_REGION_TYPE_PKTRAM = 1,
+    NRF_WIFI_REGION_TYPE_SYSBUS = 2,
+    NRF_WIFI_REGION_TYPE_PBUS = 3,
+}
+#[repr(u32)]
+#[derive(Debug, Copy, Clone, Hash, PartialEq, Eq)]
+pub enum NRF_WIFI_HAL_MSG_TYPE {
+    NRF_WIFI_HAL_MSG_TYPE_CMD_CTRL = 0,
+    NRF_WIFI_HAL_MSG_TYPE_EVENT = 1,
+    NRF_WIFI_HAL_MSG_TYPE_CMD_DATA_RX = 2,
+    NRF_WIFI_HAL_MSG_TYPE_CMD_DATA_MGMT = 3,
+    NRF_WIFI_HAL_MSG_TYPE_CMD_DATA_TX = 4,
+    NRF_WIFI_HAL_MSG_TYPE_MAX = 5,
+}
+#[repr(C)]
+#[derive(Debug, Copy, Clone)]
+pub struct nrf_wifi_hal_cfg_params {
+    pub max_cmd_size: ::core::ffi::c_uint,
+    pub max_event_size: ::core::ffi::c_uint,
+    pub rx_buf_headroom_sz: ::core::ffi::c_uchar,
+    pub tx_buf_headroom_sz: ::core::ffi::c_uchar,
+    pub rx_buf_pool: [rx_buf_pool_params; 3usize],
+    pub max_tx_frm_sz: ::core::ffi::c_uint,
+    pub max_ampdu_len_per_token: ::core::ffi::c_uint,
+}
+#[test]
+fn bindgen_test_layout_nrf_wifi_hal_cfg_params() {
+    const UNINIT: ::core::mem::MaybeUninit<nrf_wifi_hal_cfg_params> =
+        ::core::mem::MaybeUninit::uninit();
+    let ptr = UNINIT.as_ptr();
+    assert_eq!(
+        ::core::mem::size_of::<nrf_wifi_hal_cfg_params>(),
+        32usize,
+        concat!("Size of: ", stringify!(nrf_wifi_hal_cfg_params))
+    );
+    assert_eq!(
+        ::core::mem::align_of::<nrf_wifi_hal_cfg_params>(),
+        4usize,
+        concat!("Alignment of ", stringify!(nrf_wifi_hal_cfg_params))
+    );
+    assert_eq!(
+        unsafe { ::core::ptr::addr_of!((*ptr).max_cmd_size) as usize - ptr as usize },
+        0usize,
+        concat!(
+            "Offset of field: ",
+            stringify!(nrf_wifi_hal_cfg_params),
+            "::",
+            stringify!(max_cmd_size)
+        )
+    );
+    assert_eq!(
+        unsafe { ::core::ptr::addr_of!((*ptr).max_event_size) as usize - ptr as usize },
+        4usize,
+        concat!(
+            "Offset of field: ",
+            stringify!(nrf_wifi_hal_cfg_params),
+            "::",
+            stringify!(max_event_size)
+        )
+    );
+    assert_eq!(
+        unsafe { ::core::ptr::addr_of!((*ptr).rx_buf_headroom_sz) as usize - ptr as usize },
+        8usize,
+        concat!(
+            "Offset of field: ",
+            stringify!(nrf_wifi_hal_cfg_params),
+            "::",
+            stringify!(rx_buf_headroom_sz)
+        )
+    );
+    assert_eq!(
+        unsafe { ::core::ptr::addr_of!((*ptr).tx_buf_headroom_sz) as usize - ptr as usize },
+        9usize,
+        concat!(
+            "Offset of field: ",
+            stringify!(nrf_wifi_hal_cfg_params),
+            "::",
+            stringify!(tx_buf_headroom_sz)
+        )
+    );
+    assert_eq!(
+        unsafe { ::core::ptr::addr_of!((*ptr).rx_buf_pool) as usize - ptr as usize },
+        10usize,
+        concat!(
+            "Offset of field: ",
+            stringify!(nrf_wifi_hal_cfg_params),
+            "::",
+            stringify!(rx_buf_pool)
+        )
+    );
+    assert_eq!(
+        unsafe { ::core::ptr::addr_of!((*ptr).max_tx_frm_sz) as usize - ptr as usize },
+        24usize,
+        concat!(
+            "Offset of field: ",
+            stringify!(nrf_wifi_hal_cfg_params),
+            "::",
+            stringify!(max_tx_frm_sz)
+        )
+    );
+    assert_eq!(
+        unsafe { ::core::ptr::addr_of!((*ptr).max_ampdu_len_per_token) as usize - ptr as usize },
+        28usize,
+        concat!(
+            "Offset of field: ",
+            stringify!(nrf_wifi_hal_cfg_params),
+            "::",
+            stringify!(max_ampdu_len_per_token)
+        )
+    );
+}
+#[doc = " struct nrf_wifi_hal_priv - Structure to hold context information for the\n                           HAL layer.\n @opriv: Pointer to the OS abstraction layer.\n @bpriv: Pointer to the Bus abstraction layer.\n @add_dev_callbk_data: Data to be passed back when invoking @add_dev_callbk_fn.\n @add_dev_callbk_fn: Callback function to be called when a new device is being added.\n @rem_dev_callbk_fn: Callback function to be called when a device is being removed.\n @init_dev_callbk_fn: Callback function to be called when a device is being initialised.\n @deinit_dev_callbk_fn: Callback function to be called when a device is being deinitialised.\n @intr_callback_fn: Pointer to the function which needs to be called when an\n                    interrupt is received.\n @max_cmd_size: Maximum size of the command that can be sent to the\n                Firmware.\n\n This structure maintains the context information necessary for the\n operation of the HAL layer."]
 #[repr(C)]
 #[derive(Debug, Copy, Clone)]
 pub struct nrf_wifi_hal_priv {
-    pub _address: u8,
+    pub opriv: *mut nrf_wifi_osal_priv,
+    pub bpriv: *mut nrf_wifi_bal_priv,
+    pub num_devs: ::core::ffi::c_uchar,
+    pub add_dev_callbk_data: *mut ::core::ffi::c_void,
+    pub add_dev_callbk_fn: ::core::option::Option<
+        unsafe extern "C" fn(
+            add_dev_callbk_data: *mut ::core::ffi::c_void,
+            hal_dev_ctx: *mut ::core::ffi::c_void,
+        ) -> *mut ::core::ffi::c_void,
+    >,
+    pub rem_dev_callbk_fn:
+        ::core::option::Option<unsafe extern "C" fn(mac_ctx: *mut ::core::ffi::c_void)>,
+    pub init_dev_callbk_fn: ::core::option::Option<
+        unsafe extern "C" fn(mac_ctx: *mut ::core::ffi::c_void) -> nrf_wifi_status,
+    >,
+    pub deinit_dev_callbk_fn:
+        ::core::option::Option<unsafe extern "C" fn(mac_ctx: *mut ::core::ffi::c_void)>,
+    pub intr_callbk_fn: ::core::option::Option<
+        unsafe extern "C" fn(
+            mac_ctx: *mut ::core::ffi::c_void,
+            event_data: *mut ::core::ffi::c_void,
+            len: ::core::ffi::c_uint,
+        ) -> nrf_wifi_status,
+    >,
+    pub cfg_params: nrf_wifi_hal_cfg_params,
+    pub addr_pktram_base: ::core::ffi::c_ulong,
+}
+#[test]
+fn bindgen_test_layout_nrf_wifi_hal_priv() {
+    const UNINIT: ::core::mem::MaybeUninit<nrf_wifi_hal_priv> = ::core::mem::MaybeUninit::uninit();
+    let ptr = UNINIT.as_ptr();
+    assert_eq!(
+        ::core::mem::size_of::<nrf_wifi_hal_priv>(),
+        72usize,
+        concat!("Size of: ", stringify!(nrf_wifi_hal_priv))
+    );
+    assert_eq!(
+        ::core::mem::align_of::<nrf_wifi_hal_priv>(),
+        4usize,
+        concat!("Alignment of ", stringify!(nrf_wifi_hal_priv))
+    );
+    assert_eq!(
+        unsafe { ::core::ptr::addr_of!((*ptr).opriv) as usize - ptr as usize },
+        0usize,
+        concat!(
+            "Offset of field: ",
+            stringify!(nrf_wifi_hal_priv),
+            "::",
+            stringify!(opriv)
+        )
+    );
+    assert_eq!(
+        unsafe { ::core::ptr::addr_of!((*ptr).bpriv) as usize - ptr as usize },
+        4usize,
+        concat!(
+            "Offset of field: ",
+            stringify!(nrf_wifi_hal_priv),
+            "::",
+            stringify!(bpriv)
+        )
+    );
+    assert_eq!(
+        unsafe { ::core::ptr::addr_of!((*ptr).num_devs) as usize - ptr as usize },
+        8usize,
+        concat!(
+            "Offset of field: ",
+            stringify!(nrf_wifi_hal_priv),
+            "::",
+            stringify!(num_devs)
+        )
+    );
+    assert_eq!(
+        unsafe { ::core::ptr::addr_of!((*ptr).add_dev_callbk_data) as usize - ptr as usize },
+        12usize,
+        concat!(
+            "Offset of field: ",
+            stringify!(nrf_wifi_hal_priv),
+            "::",
+            stringify!(add_dev_callbk_data)
+        )
+    );
+    assert_eq!(
+        unsafe { ::core::ptr::addr_of!((*ptr).add_dev_callbk_fn) as usize - ptr as usize },
+        16usize,
+        concat!(
+            "Offset of field: ",
+            stringify!(nrf_wifi_hal_priv),
+            "::",
+            stringify!(add_dev_callbk_fn)
+        )
+    );
+    assert_eq!(
+        unsafe { ::core::ptr::addr_of!((*ptr).rem_dev_callbk_fn) as usize - ptr as usize },
+        20usize,
+        concat!(
+            "Offset of field: ",
+            stringify!(nrf_wifi_hal_priv),
+            "::",
+            stringify!(rem_dev_callbk_fn)
+        )
+    );
+    assert_eq!(
+        unsafe { ::core::ptr::addr_of!((*ptr).init_dev_callbk_fn) as usize - ptr as usize },
+        24usize,
+        concat!(
+            "Offset of field: ",
+            stringify!(nrf_wifi_hal_priv),
+            "::",
+            stringify!(init_dev_callbk_fn)
+        )
+    );
+    assert_eq!(
+        unsafe { ::core::ptr::addr_of!((*ptr).deinit_dev_callbk_fn) as usize - ptr as usize },
+        28usize,
+        concat!(
+            "Offset of field: ",
+            stringify!(nrf_wifi_hal_priv),
+            "::",
+            stringify!(deinit_dev_callbk_fn)
+        )
+    );
+    assert_eq!(
+        unsafe { ::core::ptr::addr_of!((*ptr).intr_callbk_fn) as usize - ptr as usize },
+        32usize,
+        concat!(
+            "Offset of field: ",
+            stringify!(nrf_wifi_hal_priv),
+            "::",
+            stringify!(intr_callbk_fn)
+        )
+    );
+    assert_eq!(
+        unsafe { ::core::ptr::addr_of!((*ptr).cfg_params) as usize - ptr as usize },
+        36usize,
+        concat!(
+            "Offset of field: ",
+            stringify!(nrf_wifi_hal_priv),
+            "::",
+            stringify!(cfg_params)
+        )
+    );
+    assert_eq!(
+        unsafe { ::core::ptr::addr_of!((*ptr).addr_pktram_base) as usize - ptr as usize },
+        68usize,
+        concat!(
+            "Offset of field: ",
+            stringify!(nrf_wifi_hal_priv),
+            "::",
+            stringify!(addr_pktram_base)
+        )
+    );
+}
+#[doc = " struct nrf_wifi_hal_info - Structure to hold RPU information.\n @hpqm_info: HPQM queue(s) related information.\n @rx_cmd_base: The base address for posting RX commands.\n @tx_cmd_base: The base address for posting TX commands.\n\n This structure contains RPU related information needed by the\n HAL layer."]
+#[repr(C)]
+#[derive(Debug, Copy, Clone)]
+pub struct nrf_wifi_hal_info {
+    pub hpqm_info: host_rpu_hpqm_info,
+    pub rx_cmd_base: ::core::ffi::c_uint,
+    pub tx_cmd_base: ::core::ffi::c_uint,
+}
+#[test]
+fn bindgen_test_layout_nrf_wifi_hal_info() {
+    const UNINIT: ::core::mem::MaybeUninit<nrf_wifi_hal_info> = ::core::mem::MaybeUninit::uninit();
+    let ptr = UNINIT.as_ptr();
+    assert_eq!(
+        ::core::mem::size_of::<nrf_wifi_hal_info>(),
+        64usize,
+        concat!("Size of: ", stringify!(nrf_wifi_hal_info))
+    );
+    assert_eq!(
+        ::core::mem::align_of::<nrf_wifi_hal_info>(),
+        4usize,
+        concat!("Alignment of ", stringify!(nrf_wifi_hal_info))
+    );
+    assert_eq!(
+        unsafe { ::core::ptr::addr_of!((*ptr).hpqm_info) as usize - ptr as usize },
+        0usize,
+        concat!(
+            "Offset of field: ",
+            stringify!(nrf_wifi_hal_info),
+            "::",
+            stringify!(hpqm_info)
+        )
+    );
+    assert_eq!(
+        unsafe { ::core::ptr::addr_of!((*ptr).rx_cmd_base) as usize - ptr as usize },
+        56usize,
+        concat!(
+            "Offset of field: ",
+            stringify!(nrf_wifi_hal_info),
+            "::",
+            stringify!(rx_cmd_base)
+        )
+    );
+    assert_eq!(
+        unsafe { ::core::ptr::addr_of!((*ptr).tx_cmd_base) as usize - ptr as usize },
+        60usize,
+        concat!(
+            "Offset of field: ",
+            stringify!(nrf_wifi_hal_info),
+            "::",
+            stringify!(tx_cmd_base)
+        )
+    );
+}
+#[repr(C)]
+#[derive(Debug, Copy, Clone)]
+pub struct nrf_wifi_hal_buf_map_info {
+    pub mapped: bool,
+    pub virt_addr: ::core::ffi::c_ulong,
+    pub phy_addr: ::core::ffi::c_ulong,
+    pub buf_len: ::core::ffi::c_uint,
+}
+#[test]
+fn bindgen_test_layout_nrf_wifi_hal_buf_map_info() {
+    const UNINIT: ::core::mem::MaybeUninit<nrf_wifi_hal_buf_map_info> =
+        ::core::mem::MaybeUninit::uninit();
+    let ptr = UNINIT.as_ptr();
+    assert_eq!(
+        ::core::mem::size_of::<nrf_wifi_hal_buf_map_info>(),
+        16usize,
+        concat!("Size of: ", stringify!(nrf_wifi_hal_buf_map_info))
+    );
+    assert_eq!(
+        ::core::mem::align_of::<nrf_wifi_hal_buf_map_info>(),
+        4usize,
+        concat!("Alignment of ", stringify!(nrf_wifi_hal_buf_map_info))
+    );
+    assert_eq!(
+        unsafe { ::core::ptr::addr_of!((*ptr).mapped) as usize - ptr as usize },
+        0usize,
+        concat!(
+            "Offset of field: ",
+            stringify!(nrf_wifi_hal_buf_map_info),
+            "::",
+            stringify!(mapped)
+        )
+    );
+    assert_eq!(
+        unsafe { ::core::ptr::addr_of!((*ptr).virt_addr) as usize - ptr as usize },
+        4usize,
+        concat!(
+            "Offset of field: ",
+            stringify!(nrf_wifi_hal_buf_map_info),
+            "::",
+            stringify!(virt_addr)
+        )
+    );
+    assert_eq!(
+        unsafe { ::core::ptr::addr_of!((*ptr).phy_addr) as usize - ptr as usize },
+        8usize,
+        concat!(
+            "Offset of field: ",
+            stringify!(nrf_wifi_hal_buf_map_info),
+            "::",
+            stringify!(phy_addr)
+        )
+    );
+    assert_eq!(
+        unsafe { ::core::ptr::addr_of!((*ptr).buf_len) as usize - ptr as usize },
+        12usize,
+        concat!(
+            "Offset of field: ",
+            stringify!(nrf_wifi_hal_buf_map_info),
+            "::",
+            stringify!(buf_len)
+        )
+    );
+}
+#[doc = " struct nrf_wifi_hal_dev_ctx - Structure to hold per device context information\n                              for the HAL layer.\n @hpriv: Pointer to the HAL abstraction layer.\n @idx: The index of the HAL instantiation (the instance of the device to\n       which this HAL instance is associated to)\n @mac_ctx: Pointer to the per device MAC context which is using the HAL layer.\n @dev_ctx: Pointer to the per device BUS context which is being used by the\n           HAL layer.\n @rpu_info: RPU specific information necessary for the operation\n            of the HAL.\n @num_cmds: Debug counter for number of commands sent by the host to the RPU.\n @cmd_q: Queue to hold commands before they are sent to the RPU.\n @event_q: Queue to hold events received from the RPU before they are\n           processed by the host.\n @curr_proc: The RPU MCU whose context is active for a given HAL operation.\n             This is needed only during FW loading and not necessary during\n             the regular operation after the FW has been loaded.\n @lock_hal: Lock to be used for atomic HAL operations.\n @lock_rx: Lock to be used for atomic RX operations.\n @event_tasklet: Pointer to the bottom half handler for RX events.\n @rpu_ps_state: PS state of the RPU.\n @rpu_ps_timer: Inactivity timer used to put RPU back to sleep after\n                waking it up.\n @rpu_ps_lock: Lock to be used for atomic RPU PS operations.\n @num_isrs: Debug counter for number of interrupts received from the RPU.\n @num_events: Debug counter for number of events received from the RPU.\n @num_events_resubmit: Debug counter for number of event pointers\n                       resubmitted back to the RPU.\n\n This structure maintains the context information necessary for the\n operation of the HAL. Some of the elements of the structure need to be\n initialized durign the initialization of the driver while others need to\n be kept updated over the duration of the driver operation."]
+#[repr(C)]
+#[derive(Debug, Copy, Clone)]
+pub struct nrf_wifi_hal_dev_ctx {
+    pub hpriv: *mut nrf_wifi_hal_priv,
+    pub mac_dev_ctx: *mut ::core::ffi::c_void,
+    pub bal_dev_ctx: *mut ::core::ffi::c_void,
+    pub idx: ::core::ffi::c_uchar,
+    pub rpu_info: nrf_wifi_hal_info,
+    pub num_cmds: ::core::ffi::c_uint,
+    pub cmd_q: *mut ::core::ffi::c_void,
+    pub event_q: *mut ::core::ffi::c_void,
+    pub curr_proc: RPU_PROC_TYPE,
+    pub lock_hal: *mut ::core::ffi::c_void,
+    pub event_tasklet: *mut ::core::ffi::c_void,
+    pub lock_rx: *mut ::core::ffi::c_void,
+    pub rx_buf_info: [*mut nrf_wifi_hal_buf_map_info; 3usize],
+    pub tx_buf_info: *mut nrf_wifi_hal_buf_map_info,
+    pub addr_rpu_pktram_base: ::core::ffi::c_ulong,
+    pub addr_rpu_pktram_base_tx: ::core::ffi::c_ulong,
+    pub addr_rpu_pktram_base_rx: ::core::ffi::c_ulong,
+    pub addr_rpu_pktram_base_rx_pool: [::core::ffi::c_ulong; 3usize],
+    pub tx_frame_offset: ::core::ffi::c_ulong,
+    pub event_data: *mut ::core::ffi::c_char,
+    pub event_data_curr: *mut ::core::ffi::c_char,
+    pub event_data_len: ::core::ffi::c_uint,
+    pub event_data_pending: ::core::ffi::c_uint,
+    pub event_resubmit: ::core::ffi::c_uint,
+}
+#[test]
+fn bindgen_test_layout_nrf_wifi_hal_dev_ctx() {
+    const UNINIT: ::core::mem::MaybeUninit<nrf_wifi_hal_dev_ctx> =
+        ::core::mem::MaybeUninit::uninit();
+    let ptr = UNINIT.as_ptr();
+    assert_eq!(
+        ::core::mem::size_of::<nrf_wifi_hal_dev_ctx>(),
+        172usize,
+        concat!("Size of: ", stringify!(nrf_wifi_hal_dev_ctx))
+    );
+    assert_eq!(
+        ::core::mem::align_of::<nrf_wifi_hal_dev_ctx>(),
+        4usize,
+        concat!("Alignment of ", stringify!(nrf_wifi_hal_dev_ctx))
+    );
+    assert_eq!(
+        unsafe { ::core::ptr::addr_of!((*ptr).hpriv) as usize - ptr as usize },
+        0usize,
+        concat!(
+            "Offset of field: ",
+            stringify!(nrf_wifi_hal_dev_ctx),
+            "::",
+            stringify!(hpriv)
+        )
+    );
+    assert_eq!(
+        unsafe { ::core::ptr::addr_of!((*ptr).mac_dev_ctx) as usize - ptr as usize },
+        4usize,
+        concat!(
+            "Offset of field: ",
+            stringify!(nrf_wifi_hal_dev_ctx),
+            "::",
+            stringify!(mac_dev_ctx)
+        )
+    );
+    assert_eq!(
+        unsafe { ::core::ptr::addr_of!((*ptr).bal_dev_ctx) as usize - ptr as usize },
+        8usize,
+        concat!(
+            "Offset of field: ",
+            stringify!(nrf_wifi_hal_dev_ctx),
+            "::",
+            stringify!(bal_dev_ctx)
+        )
+    );
+    assert_eq!(
+        unsafe { ::core::ptr::addr_of!((*ptr).idx) as usize - ptr as usize },
+        12usize,
+        concat!(
+            "Offset of field: ",
+            stringify!(nrf_wifi_hal_dev_ctx),
+            "::",
+            stringify!(idx)
+        )
+    );
+    assert_eq!(
+        unsafe { ::core::ptr::addr_of!((*ptr).rpu_info) as usize - ptr as usize },
+        16usize,
+        concat!(
+            "Offset of field: ",
+            stringify!(nrf_wifi_hal_dev_ctx),
+            "::",
+            stringify!(rpu_info)
+        )
+    );
+    assert_eq!(
+        unsafe { ::core::ptr::addr_of!((*ptr).num_cmds) as usize - ptr as usize },
+        80usize,
+        concat!(
+            "Offset of field: ",
+            stringify!(nrf_wifi_hal_dev_ctx),
+            "::",
+            stringify!(num_cmds)
+        )
+    );
+    assert_eq!(
+        unsafe { ::core::ptr::addr_of!((*ptr).cmd_q) as usize - ptr as usize },
+        84usize,
+        concat!(
+            "Offset of field: ",
+            stringify!(nrf_wifi_hal_dev_ctx),
+            "::",
+            stringify!(cmd_q)
+        )
+    );
+    assert_eq!(
+        unsafe { ::core::ptr::addr_of!((*ptr).event_q) as usize - ptr as usize },
+        88usize,
+        concat!(
+            "Offset of field: ",
+            stringify!(nrf_wifi_hal_dev_ctx),
+            "::",
+            stringify!(event_q)
+        )
+    );
+    assert_eq!(
+        unsafe { ::core::ptr::addr_of!((*ptr).curr_proc) as usize - ptr as usize },
+        92usize,
+        concat!(
+            "Offset of field: ",
+            stringify!(nrf_wifi_hal_dev_ctx),
+            "::",
+            stringify!(curr_proc)
+        )
+    );
+    assert_eq!(
+        unsafe { ::core::ptr::addr_of!((*ptr).lock_hal) as usize - ptr as usize },
+        96usize,
+        concat!(
+            "Offset of field: ",
+            stringify!(nrf_wifi_hal_dev_ctx),
+            "::",
+            stringify!(lock_hal)
+        )
+    );
+    assert_eq!(
+        unsafe { ::core::ptr::addr_of!((*ptr).event_tasklet) as usize - ptr as usize },
+        100usize,
+        concat!(
+            "Offset of field: ",
+            stringify!(nrf_wifi_hal_dev_ctx),
+            "::",
+            stringify!(event_tasklet)
+        )
+    );
+    assert_eq!(
+        unsafe { ::core::ptr::addr_of!((*ptr).lock_rx) as usize - ptr as usize },
+        104usize,
+        concat!(
+            "Offset of field: ",
+            stringify!(nrf_wifi_hal_dev_ctx),
+            "::",
+            stringify!(lock_rx)
+        )
+    );
+    assert_eq!(
+        unsafe { ::core::ptr::addr_of!((*ptr).rx_buf_info) as usize - ptr as usize },
+        108usize,
+        concat!(
+            "Offset of field: ",
+            stringify!(nrf_wifi_hal_dev_ctx),
+            "::",
+            stringify!(rx_buf_info)
+        )
+    );
+    assert_eq!(
+        unsafe { ::core::ptr::addr_of!((*ptr).tx_buf_info) as usize - ptr as usize },
+        120usize,
+        concat!(
+            "Offset of field: ",
+            stringify!(nrf_wifi_hal_dev_ctx),
+            "::",
+            stringify!(tx_buf_info)
+        )
+    );
+    assert_eq!(
+        unsafe { ::core::ptr::addr_of!((*ptr).addr_rpu_pktram_base) as usize - ptr as usize },
+        124usize,
+        concat!(
+            "Offset of field: ",
+            stringify!(nrf_wifi_hal_dev_ctx),
+            "::",
+            stringify!(addr_rpu_pktram_base)
+        )
+    );
+    assert_eq!(
+        unsafe { ::core::ptr::addr_of!((*ptr).addr_rpu_pktram_base_tx) as usize - ptr as usize },
+        128usize,
+        concat!(
+            "Offset of field: ",
+            stringify!(nrf_wifi_hal_dev_ctx),
+            "::",
+            stringify!(addr_rpu_pktram_base_tx)
+        )
+    );
+    assert_eq!(
+        unsafe { ::core::ptr::addr_of!((*ptr).addr_rpu_pktram_base_rx) as usize - ptr as usize },
+        132usize,
+        concat!(
+            "Offset of field: ",
+            stringify!(nrf_wifi_hal_dev_ctx),
+            "::",
+            stringify!(addr_rpu_pktram_base_rx)
+        )
+    );
+    assert_eq!(
+        unsafe {
+            ::core::ptr::addr_of!((*ptr).addr_rpu_pktram_base_rx_pool) as usize - ptr as usize
+        },
+        136usize,
+        concat!(
+            "Offset of field: ",
+            stringify!(nrf_wifi_hal_dev_ctx),
+            "::",
+            stringify!(addr_rpu_pktram_base_rx_pool)
+        )
+    );
+    assert_eq!(
+        unsafe { ::core::ptr::addr_of!((*ptr).tx_frame_offset) as usize - ptr as usize },
+        148usize,
+        concat!(
+            "Offset of field: ",
+            stringify!(nrf_wifi_hal_dev_ctx),
+            "::",
+            stringify!(tx_frame_offset)
+        )
+    );
+    assert_eq!(
+        unsafe { ::core::ptr::addr_of!((*ptr).event_data) as usize - ptr as usize },
+        152usize,
+        concat!(
+            "Offset of field: ",
+            stringify!(nrf_wifi_hal_dev_ctx),
+            "::",
+            stringify!(event_data)
+        )
+    );
+    assert_eq!(
+        unsafe { ::core::ptr::addr_of!((*ptr).event_data_curr) as usize - ptr as usize },
+        156usize,
+        concat!(
+            "Offset of field: ",
+            stringify!(nrf_wifi_hal_dev_ctx),
+            "::",
+            stringify!(event_data_curr)
+        )
+    );
+    assert_eq!(
+        unsafe { ::core::ptr::addr_of!((*ptr).event_data_len) as usize - ptr as usize },
+        160usize,
+        concat!(
+            "Offset of field: ",
+            stringify!(nrf_wifi_hal_dev_ctx),
+            "::",
+            stringify!(event_data_len)
+        )
+    );
+    assert_eq!(
+        unsafe { ::core::ptr::addr_of!((*ptr).event_data_pending) as usize - ptr as usize },
+        164usize,
+        concat!(
+            "Offset of field: ",
+            stringify!(nrf_wifi_hal_dev_ctx),
+            "::",
+            stringify!(event_data_pending)
+        )
+    );
+    assert_eq!(
+        unsafe { ::core::ptr::addr_of!((*ptr).event_resubmit) as usize - ptr as usize },
+        168usize,
+        concat!(
+            "Offset of field: ",
+            stringify!(nrf_wifi_hal_dev_ctx),
+            "::",
+            stringify!(event_resubmit)
+        )
+    );
+}
+#[doc = " struct nrf_wifi_hal_msg - Structure to hold information about a HAL message.\n @len: Length of the HAL message.\n @data: Pointer to the buffer containing the HAL message.\n\n This structure contains information about a HAL message (command/event)."]
+#[repr(C)]
+#[derive(Debug)]
+pub struct nrf_wifi_hal_msg {
+    pub len: ::core::ffi::c_uint,
+    pub data: __IncompleteArrayField<::core::ffi::c_char>,
+}
+#[test]
+fn bindgen_test_layout_nrf_wifi_hal_msg() {
+    const UNINIT: ::core::mem::MaybeUninit<nrf_wifi_hal_msg> = ::core::mem::MaybeUninit::uninit();
+    let ptr = UNINIT.as_ptr();
+    assert_eq!(
+        ::core::mem::size_of::<nrf_wifi_hal_msg>(),
+        4usize,
+        concat!("Size of: ", stringify!(nrf_wifi_hal_msg))
+    );
+    assert_eq!(
+        ::core::mem::align_of::<nrf_wifi_hal_msg>(),
+        4usize,
+        concat!("Alignment of ", stringify!(nrf_wifi_hal_msg))
+    );
+    assert_eq!(
+        unsafe { ::core::ptr::addr_of!((*ptr).len) as usize - ptr as usize },
+        0usize,
+        concat!(
+            "Offset of field: ",
+            stringify!(nrf_wifi_hal_msg),
+            "::",
+            stringify!(len)
+        )
+    );
+    assert_eq!(
+        unsafe { ::core::ptr::addr_of!((*ptr).data) as usize - ptr as usize },
+        4usize,
+        concat!(
+            "Offset of field: ",
+            stringify!(nrf_wifi_hal_msg),
+            "::",
+            stringify!(data)
+        )
+    );
 }

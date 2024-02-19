@@ -3,3 +3,4 @@
 #include "nrf700x/osal/os_if/inc/osal_ops.h"
 #include "nrf700x/osal/bus_if/bal/inc/bal_ops.h"
 #include "nrf700x/osal/bus_if/bal/inc/bal_structs.h"
+#include "nrf700x/osal/hw_if/hal/inc/hal_structs.h"

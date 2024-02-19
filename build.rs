@@ -1,11 +1,14 @@
+use std::{fs::File, io::Read, path::Path};
+
 use glob::glob;
 
 fn main() {
     println!("cargo:rerun-if-changed=build.rs");
-    println!("cargo:rerun-if-changed=src/bindings.rs");
+    // println!("cargo:rerun-if-changed=src/bindings.rs");
 
     create_bindings();
     compile_lib();
+    extract_fw_patches();
 }
 
 static C_FILES: &[&str] = &[
@@ -24,16 +27,18 @@ static C_FILES: &[&str] = &[
     "nrf700x/osal/hw_if/hal/src/hal_reg.c",
     "nrf700x/osal/bus_if/bal/src/bal.c",
     "nrf700x/osal/hw_if/hal/src/pal.c",
+    "nrf700x/osal/hw_if/hal/src/hal_fw_patch_loader.c"
 ];
 
 fn compile_lib() {
     let mut build = cc::Build::new();
-    
+
     if cfg!(windows) {
         build.compiler("clang");
     }
 
-    build.files(C_FILES.into_iter().map(|p| {
+    build
+        .files(C_FILES.into_iter().map(|p| {
             if p.starts_with("nrf700x") {
                 format!("./sdk-nrf/drivers/wifi/{p}")
             } else {
@@ -91,4 +96,41 @@ fn create_bindings() {
     bindings
         .write_to_file("./src/bindings.rs")
         .expect("Couldn't write bindings!");
+}
+
+fn extract_fw_patches() {
+    const PATCHES_FILE: &str =
+        "sdk-nrf/drivers/wifi/nrf700x/osal/fw_if/umac_if/inc/fw/rpu_fw_patches.h";
+
+    let mut patches_string = String::new();
+    File::open(PATCHES_FILE)
+        .unwrap()
+        .read_to_string(&mut patches_string)
+        .unwrap();
+
+    let non_radio_test_start = patches_string.find("#else").unwrap();
+
+    let patches_string = &patches_string[non_radio_test_start..];
+
+    for item in patches_string
+        .split_inclusive("const unsigned char __aligned(4) ")
+        .skip(1)
+    {
+        let item_name = &item[..item.find("[").unwrap()];
+        let item_data = &item[item.find("{").unwrap()..item.find("}").unwrap()]
+            .strip_prefix("{")
+            .unwrap()
+            .replace("/n", "")
+            .replace("/t", "");
+
+        let mut data = Vec::new();
+
+        for byte in item_data.split(",") {
+            let byte = u8::from_str_radix(byte.trim().strip_prefix("0x").unwrap(), 16).unwrap();
+            data.push(byte);
+        }
+
+        let out_dir = std::env::var("OUT_DIR").unwrap();
+        File::create(Path::new(&out_dir).join(&format!("{item_name}.bin"))).unwrap();
+    }
 }

@@ -10,3 +10,4 @@ target = "thumbv8m.main-none-eabihf"
 
 [env]
 DEFMT_LOG = "info,nrf7002_example=trace"
+DEFMT_RTT_BUFFER_SIZE = "8192"

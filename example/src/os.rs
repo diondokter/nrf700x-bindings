@@ -126,6 +126,12 @@ unsafe extern "C" fn mem_alloc(size: usize) -> *mut core::ffi::c_void {
     // trace!("Called OS mem_alloc");
     let ptr: *mut usize =
         alloc::alloc::alloc(Layout::from_size_align(size + size_of::<usize>(), 4).unwrap()).cast();
+
+    if ptr.is_null() {
+        defmt::println!("OOM! Requested size {}", size);
+        return null_mut();
+    }
+
     ptr.write_volatile(size);
     ptr.add(1).cast()
 }
@@ -134,6 +140,12 @@ unsafe extern "C" fn mem_zalloc(size: usize) -> *mut core::ffi::c_void {
     let ptr: *mut usize =
         alloc::alloc::alloc_zeroed(Layout::from_size_align(size + size_of::<usize>(), 4).unwrap())
             .cast();
+
+    if ptr.is_null() {
+        defmt::println!("OOM! Requested size {}", size);
+        return null_mut();
+    }
+
     ptr.write_volatile(size);
     ptr.add(1).cast()
 }
@@ -612,11 +624,21 @@ unsafe extern "C" fn tasklet_kill(tasklet: *mut core::ffi::c_void) {
 
 unsafe extern "C" fn sleep_ms(msecs: core::ffi::c_int) -> core::ffi::c_int {
     trace!("Called OS sleep_ms");
-    todo!();
+
+    for _ in 0..msecs {
+        cortex_m::asm::delay(64_000)
+    }
+
+    0
 }
 unsafe extern "C" fn delay_us(usecs: core::ffi::c_int) -> core::ffi::c_int {
     trace!("Called OS delay_us");
-    todo!();
+
+    for _ in 0..usecs {
+        cortex_m::asm::delay(64)
+    }
+
+    0
 }
 unsafe extern "C" fn time_get_curr_us() -> core::ffi::c_ulong {
     trace!("Called OS time_get_curr_us");
