@@ -9,14 +9,14 @@ use core::{
     sync::atomic::{AtomicBool, AtomicU16},
 };
 
-use alloc::{alloc::Layout, boxed::Box};
+use alloc::boxed::Box;
 
 use defmt::{info, trace};
 use embassy_sync::{blocking_mutex::raw::CriticalSectionRawMutex, channel::Channel};
 use futures::FutureExt;
 use nrf700x_sys::{
     nrf_wifi_assert_op_type, nrf_wifi_osal_dma_dir, nrf_wifi_osal_host_map, nrf_wifi_osal_ops,
-    nrf_wifi_status, nrf_wifi_tasklet_type, va_list,
+    nrf_wifi_status, nrf_wifi_tasklet_type,
 };
 
 #[no_mangle]
@@ -51,9 +51,9 @@ extern "C" fn get_os_ops() -> *const nrf_wifi_osal_ops {
         spinlock_rel: Some(spinlock_rel),
         spinlock_irq_take: Some(spinlock_irq_take),
         spinlock_irq_rel: Some(spinlock_irq_rel),
-        log_dbg: Some(log_dbg),
-        log_info: Some(log_info),
-        log_err: Some(log_err),
+        log_dbg: Some(c_log_dbg),
+        log_info: Some(c_log_info),
+        log_err: Some(c_log_err),
         llist_node_alloc: Some(llist_node_alloc),
         llist_node_free: Some(llist_node_free),
         llist_node_data_get: Some(llist_node_data_get),
@@ -123,39 +123,13 @@ extern "C" fn get_os_ops() -> *const nrf_wifi_osal_ops {
 }
 
 unsafe extern "C" fn mem_alloc(size: usize) -> *mut core::ffi::c_void {
-    // trace!("Called OS mem_alloc");
-    let ptr: *mut usize =
-        alloc::alloc::alloc(Layout::from_size_align(size + size_of::<usize>(), 4).unwrap()).cast();
-
-    if ptr.is_null() {
-        defmt::println!("OOM! Requested size {}", size);
-        return null_mut();
-    }
-
-    ptr.write_volatile(size);
-    ptr.add(1).cast()
+    tinyrlibc::malloc(size).cast()
 }
 unsafe extern "C" fn mem_zalloc(size: usize) -> *mut core::ffi::c_void {
-    // trace!("Called OS mem_zalloc");
-    let ptr: *mut usize =
-        alloc::alloc::alloc_zeroed(Layout::from_size_align(size + size_of::<usize>(), 4).unwrap())
-            .cast();
-
-    if ptr.is_null() {
-        defmt::println!("OOM! Requested size {}", size);
-        return null_mut();
-    }
-
-    ptr.write_volatile(size);
-    ptr.add(1).cast()
+    tinyrlibc::calloc(1, size).cast()
 }
 unsafe extern "C" fn mem_free(buf: *mut core::ffi::c_void) {
-    trace!("Called OS mem_free");
-    let ptr = buf.cast::<usize>().offset(-1);
-    alloc::alloc::dealloc(
-        ptr.cast(),
-        Layout::from_size_align(*ptr + size_of::<usize>(), 4).unwrap(),
-    )
+    tinyrlibc::free(buf.cast());
 }
 unsafe extern "C" fn mem_cpy(
     dest: *mut core::ffi::c_void,
@@ -339,17 +313,18 @@ unsafe extern "C" fn spinlock_irq_rel(
     spinlock_rel(lock);
     critical_section::release(*(flags.cast()));
 }
-unsafe extern "C" fn log_dbg(fmt: *const core::ffi::c_char, args: va_list) -> core::ffi::c_int {
-    trace!("Called OS log_dbg");
-    todo!();
+
+#[no_mangle]
+unsafe extern "C" fn rust_log_dbg(log: *const core::ffi::c_char, len: usize) {
+    defmt::debug!("Lib log:\n{}", core::str::from_utf8(core::slice::from_raw_parts(log.cast::<u8>(), len)).unwrap());
 }
-unsafe extern "C" fn log_info(fmt: *const core::ffi::c_char, args: va_list) -> core::ffi::c_int {
-    trace!("Called OS log_info");
-    todo!();
+#[no_mangle]
+unsafe extern "C" fn rust_log_info(log: *const core::ffi::c_char, len: usize) {
+    defmt::info!("Lib log:\n{}", core::str::from_utf8(core::slice::from_raw_parts(log.cast::<u8>(), len)).unwrap());
 }
-unsafe extern "C" fn log_err(fmt: *const core::ffi::c_char, args: va_list) -> core::ffi::c_int {
-    trace!("Called OS log_err");
-    todo!();
+#[no_mangle]
+unsafe extern "C" fn rust_log_err(log: *const core::ffi::c_char, len: usize) {
+    defmt::error!("Lib log:\n{}", core::str::from_utf8(core::slice::from_raw_parts(log.cast::<u8>(), len)).unwrap());
 }
 unsafe extern "C" fn llist_node_alloc() -> *mut core::ffi::c_void {
     trace!("Called OS llist_node_alloc");
@@ -827,7 +802,7 @@ unsafe extern "C" fn assert(
 }
 unsafe extern "C" fn strlen(str_: *const core::ffi::c_void) -> core::ffi::c_uint {
     trace!("Called OS strlen");
-    todo!();
+    tinyrlibc::strlen(str_.cast()) as _
 }
 
 struct LinkedList {
@@ -908,4 +883,10 @@ pub async fn run_work_queue() -> ! {
             }
         }
     }
+}
+
+extern "C" {
+    fn c_log_dbg(fmt: *const core::ffi::c_char, args: nrf700x_sys::va_list) -> core::ffi::c_int;
+    fn c_log_info(fmt: *const core::ffi::c_char, args: nrf700x_sys::va_list) -> core::ffi::c_int;
+    fn c_log_err(fmt: *const core::ffi::c_char, args: nrf700x_sys::va_list) -> core::ffi::c_int;
 }

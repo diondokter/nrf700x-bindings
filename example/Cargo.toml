@@ -41,6 +41,7 @@ align-data = "0.1.0"
 num_enum = { version = "0.7.2", default-features = false }
 embedded-alloc = "0.5.1"
 critical-section = "1.1.2"
+tinyrlibc = { git = "https://github.com/rust-embedded-community/tinyrlibc.git", version = "0.3.0" }
 
 [profile.dev]
 debug = 2

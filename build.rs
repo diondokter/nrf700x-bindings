@@ -1,10 +1,10 @@
-use std::{fs::File, io::Read, path::Path};
+use std::{fs::File, io::{Read, Write}, path::Path};
 
 use glob::glob;
 
 fn main() {
     println!("cargo:rerun-if-changed=build.rs");
-    // println!("cargo:rerun-if-changed=src/bindings.rs");
+    println!("cargo:rerun-if-changed=src/logging.c");
 
     create_bindings();
     compile_lib();
@@ -27,7 +27,11 @@ static C_FILES: &[&str] = &[
     "nrf700x/osal/hw_if/hal/src/hal_reg.c",
     "nrf700x/osal/bus_if/bal/src/bal.c",
     "nrf700x/osal/hw_if/hal/src/pal.c",
-    "nrf700x/osal/hw_if/hal/src/hal_fw_patch_loader.c"
+    "nrf700x/osal/hw_if/hal/src/hal_fw_patch_loader.c",
+    "nrf700x/osal/fw_if/umac_if/src/fmac_vif.c",
+    "nrf700x/osal/fw_if/umac_if/src/cmd.c",
+    "nrf700x/osal/utils/src/util.c",
+    "src/logging.c",
 ];
 
 fn compile_lib() {
@@ -50,6 +54,9 @@ fn compile_lib() {
         .define("CONFIG_NRF700X_RX_NUM_BUFS", "2")
         .define("CONFIG_NRF700X_RX_MAX_DATA_SIZE", "2048")
         .define("CONFIG_NRF_WIFI_IFACE_MTU", "1600")
+        .define("CONFIG_NRF700X_REG_DOMAIN", "\"NL\"")
+        .define("CONFIG_WIFI_NRF700X_LOG_LEVEL", "NRF_WIFI_LOG_LEVEL_DBG")
+        .define("CONFIG_NRF700X_LOG_VERBOSE", None)
         .warnings(false)
         .extra_warnings(false)
         .includes(
@@ -131,6 +138,7 @@ fn extract_fw_patches() {
         }
 
         let out_dir = std::env::var("OUT_DIR").unwrap();
-        File::create(Path::new(&out_dir).join(&format!("{item_name}.bin"))).unwrap();
+        let mut out_file = File::create(Path::new(&out_dir).join(&format!("{item_name}.bin"))).unwrap();
+        out_file.write_all(&data).unwrap();
     }
 }

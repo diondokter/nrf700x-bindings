@@ -7,7 +7,12 @@
         "xiosbase": "c",
         "fmac_cmd.h": "c",
         "queue.h": "c",
-        "osal_ops.h": "c"
+        "osal_ops.h": "c",
+        "array": "c",
+        "vector": "c",
+        "xstring": "c",
+        "xutility": "c",
+        "xmemory": "c"
     },
     "rust-analyzer.linkedProjects": [
         "Cargo.toml",

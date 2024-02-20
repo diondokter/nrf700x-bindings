@@ -5,7 +5,7 @@
 #![allow(async_fn_in_trait)]
 
 use core::ffi::c_void;
-use core::ptr::addr_of_mut;
+use core::ptr::{addr_of_mut, null_mut};
 
 use crate::bus::BusDeviceObject;
 use cortex_m_rt::exception;
@@ -16,7 +16,9 @@ use embassy_nrf::spim::Spim;
 use embassy_nrf::{bind_interrupts, spim};
 use embassy_time::{Delay, Duration, Timer};
 use embedded_hal_bus::spi::ExclusiveDevice;
-use nrf700x_sys::{nrf_wifi_fmac_fw_info, nrf_wifi_fw_info};
+use nrf700x_sys::{
+    nrf_wifi_fmac_fw_info, nrf_wifi_fw_info, nrf_wifi_iftype, nrf_wifi_umac_add_vif_info, op_band,
+};
 
 use {embassy_nrf as _, panic_probe as _};
 
@@ -64,16 +66,15 @@ async fn main(spawner: Spawner) {
     //let coex_status0 = Output::new(p.P0_30, Level::High, OutputDrive::Standard);
     //let coex_status1 = Output::new(p.P0_29, Level::High, OutputDrive::Standard);
     //let coex_grant = Output::new(p.P0_24, Level::High, OutputDrive::Standard);
-    let _bucken = Output::new(p.P0_12.degrade(), Level::Low, OutputDrive::HighDrive);
-    let _iovdd_ctl = Output::new(p.P0_31.degrade(), Level::Low, OutputDrive::Standard);
+    let mut bucken = Output::new(p.P0_12.degrade(), Level::Low, OutputDrive::HighDrive);
+    let mut iovdd_ctl = Output::new(p.P0_31.degrade(), Level::Low, OutputDrive::Standard);
     let _host_irq = Input::new(p.P0_23.degrade(), Pull::None);
 
     let mut config = spim::Config::default();
     config.frequency = spim::Frequency::M8;
     let spim = Spim::new(p.SERIAL0, Irqs, sck, dio1, dio0, config);
     let csn = Output::new(csn, Level::High, OutputDrive::HighDrive);
-    let spi: BusDeviceObject =
-        static_cell::make_static!(ExclusiveDevice::new(spim, csn, Delay));
+    let spi: BusDeviceObject = static_cell::make_static!(ExclusiveDevice::new(spim, csn, Delay));
 
     /*
     // QSPI is not working well yet.
@@ -87,6 +88,16 @@ async fn main(spawner: Spawner) {
     let qspi: qspi::Qspi<_> = qspi::Qspi::new(p.QSPI, irq, sck, csn, dio0, dio1, dio2, dio3, config);
     let bus = QspiBus { qspi };
     */
+
+    defmt::info!("power on...");
+    Timer::after(Duration::from_millis(10)).await;
+    bucken.set_high();
+    Timer::after(Duration::from_millis(10)).await;
+    iovdd_ctl.set_high();
+    Timer::after(Duration::from_millis(10)).await;
+    defmt::info!("wakeup...");
+    rpu_wakeup(unsafe { &mut *spi }).await;
+    rpu_enable_clocks(unsafe { &mut *spi });
 
     unsafe {
         let mut data_config = nrf700x_sys::nrf_wifi_data_config_params {
@@ -138,6 +149,20 @@ async fn main(spawner: Spawner) {
 
         defmt::info!("fmac_dev_ctx: {}", (&mut os_ctx) as *mut OsContext);
 
+        if nrf700x_sys::nrf_wifi_fmac_dev_init(
+            fmac_dev_ctx,
+            null_mut(),
+            0,
+            op_band::BAND_ALL,
+            false,
+            null_mut(),
+            null_mut(),
+        )
+        .failed()
+        {
+            panic!("Could not init fmac dev");
+        }
+
         let mut version = 0u32;
         if nrf700x_sys::nrf_wifi_fmac_ver_get(fmac_dev_ctx, &mut version as *mut _).failed() {
             defmt::error!("fmac version is error");
@@ -187,6 +212,61 @@ async fn main(spawner: Spawner) {
             defmt::info!("fmac version is {}", version);
         }
 
+        defmt::info!("Adding interface");
+
+        let mut mac_addr = [0; 6];
+        const IF_NAME: &str = "TEST_INTERFACE";
+        let mut ifacename = [0i8; 16];
+        ifacename
+            .iter_mut()
+            .zip(IF_NAME.as_bytes())
+            .for_each(|(a, b)| *a = *b as i8);
+
+        let mut vif_info = nrf_wifi_umac_add_vif_info {
+            iftype: nrf_wifi_iftype::NRF_WIFI_IFTYPE_STATION as i32,
+            nrf_wifi_use_4addr: 0,
+            mon_flags: 0,
+            mac_addr: mac_addr,
+            ifacename,
+        };
+        let vif_idx = nrf700x_sys::nrf_wifi_fmac_add_vif(
+            fmac_dev_ctx.cast(),
+            // Reuse the same os context for ease. This seems to be a user context
+            ((&mut os_ctx) as *mut OsContext).cast(),
+            &mut vif_info as *mut _,
+        );
+
+        defmt::info!("Interface added. vif_idx: {}", vif_idx);
+
+        if nrf700x_sys::nrf_wifi_fmac_otp_mac_addr_get(
+            fmac_dev_ctx,
+            vif_idx,
+            &mut mac_addr as *mut _,
+        )
+        .failed()
+        {
+            panic!("Could not get OTP mac addr!");
+        }
+
+        if nrf700x_sys::nrf_wifi_fmac_set_vif_macaddr(
+            fmac_dev_ctx.cast(),
+            vif_idx,
+            &mut mac_addr as *mut _,
+        )
+        .failed()
+        {
+            panic!("Could not set mac addr");
+        }
+
+        defmt::info!(
+            "Set mac address: {:X}-{:X}-{:X}-{:X}-{:X}-{:X}",
+            mac_addr[0],
+            mac_addr[1],
+            mac_addr[2],
+            mac_addr[3],
+            mac_addr[4],
+            mac_addr[5]
+        );
     }
 }
 
@@ -245,4 +325,37 @@ unsafe extern "C" fn disp_scan_res_callbk_fn(
     _more_res: bool,
 ) {
     defmt::info!("disp_scan_res_callbk_fn");
+}
+
+async fn rpu_wait_until_wakeup_req(bus: &mut dyn bus::BusDevice) {
+    for _ in 0..10 {
+        if bus.read_sr2() == SR2_RPU_WAKEUP_REQ {
+            return;
+        }
+        Timer::after(Duration::from_millis(1)).await;
+    }
+    panic!("wakeup_req never came")
+}
+
+async fn rpu_wakeup(bus: &mut dyn bus::BusDevice) {
+    bus.write_sr2(SR2_RPU_WAKEUP_REQ);
+    rpu_wait_until_wakeup_req(bus).await;
+    rpu_wait_until_awake(bus).await;
+}
+
+async fn rpu_wait_until_awake(bus: &mut dyn bus::BusDevice) {
+    for _ in 0..10 {
+        if bus.read_sr1() & SR1_RPU_AWAKE != 0 {
+            return;
+        }
+        Timer::after(Duration::from_millis(1)).await;
+    }
+    panic!("awakening never came")
+}
+
+const SR1_RPU_AWAKE: u8 = 0x02;
+const SR2_RPU_WAKEUP_REQ: u8 = 0x01;
+
+fn rpu_enable_clocks(bus: &mut dyn bus::BusDevice) {
+    bus.write(0x048C20, &0x100u32.to_le_bytes());
 }
