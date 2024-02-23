@@ -7,6 +7,8 @@ extern void rust_log_err(const char *log, size_t len);
 
 #define min(a, b) (((a) < (b)) ? (a) : (b))
 
+extern int vsnprintf(char *, unsigned int, const char *, va_list);
+
 int c_log_info(const char *fmt, va_list argptr) {
     char formatted_string[1024] = {0};
 

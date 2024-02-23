@@ -32,6 +32,7 @@ static C_FILES: &[&str] = &[
     "nrf700x/osal/fw_if/umac_if/src/cmd.c",
     "nrf700x/osal/utils/src/util.c",
     "src/logging.c",
+    "nrf700x/osal/bus_if/bus/spi/src/spi.c",
 ];
 
 fn compile_lib() {

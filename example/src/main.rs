@@ -4,21 +4,26 @@
 #![deny(unused_must_use)]
 #![allow(async_fn_in_trait)]
 
+use core::cell::RefCell;
 use core::ffi::c_void;
 use core::ptr::{addr_of_mut, null_mut};
 
 use crate::bus::BusDeviceObject;
 use cortex_m_rt::exception;
+use critical_section::Mutex;
 use defmt_rtt as _; // global logger
-use embassy_executor::Spawner;
+use embassy_executor::{InterruptExecutor, Spawner};
 use embassy_nrf::gpio::{AnyPin, Input, Level, Output, OutputDrive, Pin, Pull};
+use embassy_nrf::interrupt::{InterruptExt, Priority};
 use embassy_nrf::spim::Spim;
-use embassy_nrf::{bind_interrupts, spim};
+use embassy_nrf::{bind_interrupts, interrupt, spim};
 use embassy_time::{Delay, Duration, Timer};
 use embedded_hal_bus::spi::ExclusiveDevice;
 use nrf700x_sys::{
-    nrf_wifi_fmac_fw_info, nrf_wifi_fw_info, nrf_wifi_iftype, nrf_wifi_umac_add_vif_info, op_band,
+    nrf_wifi_fmac_fw_info, nrf_wifi_fw_info, nrf_wifi_iftype, nrf_wifi_tx_pwr_ceil_params,
+    nrf_wifi_tx_pwr_ctrl_params, nrf_wifi_umac_add_vif_info, op_band,
 };
+use static_cell::make_static;
 
 use {embassy_nrf as _, panic_probe as _};
 
@@ -29,6 +34,21 @@ mod os;
 bind_interrupts!(struct Irqs {
     SERIAL0 => spim::InterruptHandler<embassy_nrf::peripherals::SERIAL0>;
 });
+
+#[embassy_executor::task]
+async fn interrupt_watcher(
+    bus_interrupt: &'static Mutex<RefCell<Option<BusInterrupt>>>,
+    mut host_irq: Input<'static, AnyPin>,
+) -> ! {
+    loop {
+        host_irq.wait_for_high().await;
+        defmt::debug!("Interrupt!");
+
+        if let Some(irq) = critical_section::with(|cs| bus_interrupt.borrow_ref_mut(cs).clone()) {
+            irq.call();
+        }
+    }
+}
 
 #[embassy_executor::task]
 async fn run_wifi_work_queue() -> ! {
@@ -46,15 +66,28 @@ async fn blink_task(led: AnyPin) -> ! {
     }
 }
 
+static EXECUTOR_HIGH: InterruptExecutor = InterruptExecutor::new();
+
+#[interrupt]
+unsafe fn EGU0() {
+    EXECUTOR_HIGH.on_interrupt()
+}
+
 #[embassy_executor::main]
-async fn main(spawner: Spawner) {
+async fn main(_spawner: Spawner) {
     alloc_impl::init_heap();
 
     defmt::info!("Hello World!");
     let config: embassy_nrf::config::Config = Default::default();
     let p = embassy_nrf::init(config);
-    spawner.spawn(blink_task(p.P1_06.degrade())).unwrap();
-    spawner.spawn(run_wifi_work_queue()).unwrap();
+
+    interrupt::EGU0.set_priority(Priority::P0);
+    let high_prio_spawner = EXECUTOR_HIGH.start(interrupt::EGU0);
+
+    high_prio_spawner
+        .spawn(blink_task(p.P1_06.degrade()))
+        .unwrap();
+    high_prio_spawner.spawn(run_wifi_work_queue()).unwrap();
 
     let sck = p.P0_17;
     let csn = p.P0_18;
@@ -68,13 +101,16 @@ async fn main(spawner: Spawner) {
     //let coex_grant = Output::new(p.P0_24, Level::High, OutputDrive::Standard);
     let mut bucken = Output::new(p.P0_12.degrade(), Level::Low, OutputDrive::HighDrive);
     let mut iovdd_ctl = Output::new(p.P0_31.degrade(), Level::Low, OutputDrive::Standard);
-    let _host_irq = Input::new(p.P0_23.degrade(), Pull::None);
+    let host_irq = Input::new(p.P0_23.degrade(), Pull::None);
 
     let mut config = spim::Config::default();
     config.frequency = spim::Frequency::M8;
     let spim = Spim::new(p.SERIAL0, Irqs, sck, dio1, dio0, config);
     let csn = Output::new(csn, Level::High, OutputDrive::HighDrive);
     let spi: BusDeviceObject = static_cell::make_static!(ExclusiveDevice::new(spim, csn, Delay));
+
+    let bus_interrupt = make_static!(Mutex::new(RefCell::new(None)));
+    high_prio_spawner.must_spawn(interrupt_watcher(bus_interrupt, host_irq));
 
     /*
     // QSPI is not working well yet.
@@ -140,7 +176,10 @@ async fn main(spawner: Spawner) {
 
         defmt::info!("fpriv: {}", fpriv);
 
-        let mut os_ctx = OsContext { bus: spi };
+        let mut os_ctx = OsContext {
+            bus: spi,
+            bus_interrupt,
+        };
 
         defmt::info!("os_ctx: {}", (&mut os_ctx) as *mut OsContext);
 
@@ -149,19 +188,8 @@ async fn main(spawner: Spawner) {
 
         defmt::info!("fmac_dev_ctx: {}", (&mut os_ctx) as *mut OsContext);
 
-        if nrf700x_sys::nrf_wifi_fmac_dev_init(
-            fmac_dev_ctx,
-            null_mut(),
-            0,
-            op_band::BAND_ALL,
-            false,
-            null_mut(),
-            null_mut(),
-        )
-        .failed()
-        {
-            panic!("Could not init fmac dev");
-        }
+        let mut tx_pwr_ctrl_params = core::mem::zeroed::<nrf_wifi_tx_pwr_ctrl_params>();
+        let mut tx_pwr_ceil_params = core::mem::zeroed::<nrf_wifi_tx_pwr_ceil_params>();
 
         let mut version = 0u32;
         if nrf700x_sys::nrf_wifi_fmac_ver_get(fmac_dev_ctx, &mut version as *mut _).failed() {
@@ -210,6 +238,20 @@ async fn main(spawner: Spawner) {
             defmt::error!("fmac version is error");
         } else {
             defmt::info!("fmac version is {}", version);
+        }
+
+        if nrf700x_sys::nrf_wifi_fmac_dev_init(
+            fmac_dev_ctx,
+            null_mut(),
+            0,
+            op_band::BAND_ALL,
+            false,
+            &mut tx_pwr_ctrl_params as *mut _,
+            &mut tx_pwr_ceil_params as *mut _,
+        )
+        .failed()
+        {
+            panic!("Could not init fmac dev");
         }
 
         defmt::info!("Adding interface");
@@ -272,6 +314,22 @@ async fn main(spawner: Spawner) {
 
 struct OsContext {
     bus: BusDeviceObject,
+    bus_interrupt: &'static Mutex<RefCell<Option<BusInterrupt>>>,
+}
+
+#[derive(Debug, Clone)]
+struct BusInterrupt {
+    interrupt_data: *mut core::ffi::c_void,
+    interrupt_callback:
+        unsafe extern "C" fn(callbk_data: *mut core::ffi::c_void) -> core::ffi::c_int,
+}
+
+unsafe impl Send for BusInterrupt {}
+
+impl BusInterrupt {
+    pub fn call(&self) -> core::ffi::c_int {
+        unsafe { (self.interrupt_callback)(self.interrupt_data) }
+    }
 }
 
 #[exception]

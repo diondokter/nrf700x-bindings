@@ -7,7 +7,7 @@
         {
             "type": "probe-rs-debug",
             "request": "launch",
-            "name": "Run example",
+            "name": "Run example probe-rs",
             "preLaunchTask": "build example",
             "cwd": "${workspaceFolder}/example",
             "chip": "nRF5340_xxAA",
@@ -23,6 +23,16 @@
                     "rttEnabled": true
                 }
             ]
+        },
+        {
+            "type": "cortex-debug",
+            "request": "launch",
+            "name": "Run example cortex-debug",
+            "preLaunchTask": "build example",
+            "cwd": "${workspaceFolder}/example",
+            "executable": "./target/thumbv8m.main-none-eabihf/debug/nrf7002-example",
+            "device": "nRF5340",
+            "servertype": "jlink",
         }
     ]
 }

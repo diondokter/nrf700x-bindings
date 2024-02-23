@@ -1,3 +1,3 @@
 /target
 /Cargo.lock
-./src/bindings.rs
+src/bindings.rs

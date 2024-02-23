@@ -12,7 +12,17 @@
         "vector": "c",
         "xstring": "c",
         "xutility": "c",
-        "xmemory": "c"
+        "xmemory": "c",
+        "algorithm": "c",
+        "functional": "c",
+        "limits": "c",
+        "list": "c",
+        "map": "c",
+        "memory": "c",
+        "type_traits": "c",
+        "utility": "c",
+        "xhash": "c",
+        "xtree": "c"
     },
     "rust-analyzer.linkedProjects": [
         "Cargo.toml",

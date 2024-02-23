@@ -9,15 +9,21 @@ use core::{
     sync::atomic::{AtomicBool, AtomicU16},
 };
 
-use alloc::boxed::Box;
+use alloc::{
+    boxed::Box,
+    vec::{self, Vec},
+};
 
 use defmt::{info, trace};
 use embassy_sync::{blocking_mutex::raw::CriticalSectionRawMutex, channel::Channel};
 use futures::FutureExt;
 use nrf700x_sys::{
-    nrf_wifi_assert_op_type, nrf_wifi_osal_dma_dir, nrf_wifi_osal_host_map, nrf_wifi_osal_ops,
+    nrf_wifi_assert_op_type, nrf_wifi_bal_dev_ctx, nrf_wifi_bus_spi_dev_ctx, nrf_wifi_fmac_dev_ctx,
+    nrf_wifi_hal_dev_ctx, nrf_wifi_osal_dma_dir, nrf_wifi_osal_host_map, nrf_wifi_osal_ops,
     nrf_wifi_status, nrf_wifi_tasklet_type,
 };
+
+use crate::{bus::BusDeviceObject, OsContext};
 
 #[no_mangle]
 extern "C" fn get_os_ops() -> *const nrf_wifi_osal_ops {
@@ -243,8 +249,10 @@ unsafe extern "C" fn spi_read_reg32(
     priv_: *mut core::ffi::c_void,
     addr: core::ffi::c_ulong,
 ) -> core::ffi::c_uint {
-    trace!("Called OS spi_read_reg32");
-    todo!();
+    trace!("Called OS spi_read_reg32: {}", priv_);
+    let mut buffer = [0; 4];
+    (*(*priv_.cast::<SpiDevice>()).device_object).read(addr, &mut buffer);
+    u32::from_le_bytes(buffer)
 }
 unsafe extern "C" fn spi_write_reg32(
     priv_: *mut core::ffi::c_void,
@@ -252,7 +260,7 @@ unsafe extern "C" fn spi_write_reg32(
     val: core::ffi::c_uint,
 ) {
     trace!("Called OS spi_write_reg32");
-    todo!();
+    (*(*priv_.cast::<SpiDevice>()).device_object).write(addr, &val.to_le_bytes());
 }
 unsafe extern "C" fn spi_cpy_from(
     priv_: *mut core::ffi::c_void,
@@ -260,8 +268,19 @@ unsafe extern "C" fn spi_cpy_from(
     addr: core::ffi::c_ulong,
     count: usize,
 ) {
-    trace!("Called OS spi_cpy_from");
-    todo!();
+    (*(*priv_.cast::<SpiDevice>()).device_object).read(
+        addr as u32,
+        core::slice::from_raw_parts_mut(dest.cast(), count),
+    );
+
+    defmt::flush();
+    trace!(
+        "Called OS spi_cpy_from {:08X} len={:08X} buf={:02X}",
+        addr,
+        count,
+        core::slice::from_raw_parts_mut(dest.cast::<u8>(), count)
+    );
+    defmt::flush();
 }
 unsafe extern "C" fn spi_cpy_to(
     priv_: *mut core::ffi::c_void,
@@ -269,8 +288,10 @@ unsafe extern "C" fn spi_cpy_to(
     src: *const core::ffi::c_void,
     count: usize,
 ) {
-    trace!("Called OS spi_cpy_to");
-    todo!();
+    trace!("Called OS spi_cpy_to {:X} (len: {})", addr, count);
+
+    (*(*priv_.cast::<SpiDevice>()).device_object)
+        .write(addr as u32, core::slice::from_raw_parts(src.cast(), count));
 }
 unsafe extern "C" fn spinlock_alloc() -> *mut core::ffi::c_void {
     // trace!("Called OS spinlock_alloc");
@@ -316,15 +337,36 @@ unsafe extern "C" fn spinlock_irq_rel(
 
 #[no_mangle]
 unsafe extern "C" fn rust_log_dbg(log: *const core::ffi::c_char, len: usize) {
-    defmt::debug!("Lib log:\n{}", core::str::from_utf8(core::slice::from_raw_parts(log.cast::<u8>(), len)).unwrap());
+    defmt::flush();
+    defmt::debug!(
+        "Lib log:\n--- {}",
+        core::str::from_utf8(core::slice::from_raw_parts(log.cast::<u8>(), len))
+            .unwrap()
+            .trim_end()
+    );
+    defmt::flush();
 }
 #[no_mangle]
 unsafe extern "C" fn rust_log_info(log: *const core::ffi::c_char, len: usize) {
-    defmt::info!("Lib log:\n{}", core::str::from_utf8(core::slice::from_raw_parts(log.cast::<u8>(), len)).unwrap());
+    defmt::flush();
+    defmt::info!(
+        "Lib log:\n--- {}",
+        core::str::from_utf8(core::slice::from_raw_parts(log.cast::<u8>(), len))
+            .unwrap()
+            .trim_end()
+    );
+    defmt::flush();
 }
 #[no_mangle]
 unsafe extern "C" fn rust_log_err(log: *const core::ffi::c_char, len: usize) {
-    defmt::error!("Lib log:\n{}", core::str::from_utf8(core::slice::from_raw_parts(log.cast::<u8>(), len)).unwrap());
+    defmt::flush();
+    defmt::error!(
+        "Lib log:\n--- {}",
+        core::str::from_utf8(core::slice::from_raw_parts(log.cast::<u8>(), len))
+            .unwrap()
+            .trim_end()
+    );
+    defmt::flush();
 }
 unsafe extern "C" fn llist_node_alloc() -> *mut core::ffi::c_void {
     trace!("Called OS llist_node_alloc");
@@ -351,47 +393,53 @@ unsafe extern "C" fn llist_node_data_set(
 }
 unsafe extern "C" fn llist_alloc() -> *mut core::ffi::c_void {
     // trace!("Called OS llist_alloc");
-    Box::into_raw(Box::new(Option::<LinkedList>::None)).cast()
-}
-unsafe extern "C" fn llist_free(llist: *mut core::ffi::c_void) {
-    trace!("Called OS llist_free");
-    drop(Box::from_raw(llist.cast::<Option<LinkedList>>()));
-}
-unsafe extern "C" fn llist_init(llist: *mut core::ffi::c_void) {
-    // trace!("Called OS llist_init");
-    *llist.cast::<Option<LinkedList>>() = Some(LinkedList {
+    Box::into_raw(Box::new(LinkedList {
         head: null_mut(),
         tail: null_mut(),
         len: 0,
-    });
+    }))
+    .cast()
+}
+unsafe extern "C" fn llist_free(llist: *mut core::ffi::c_void) {
+    trace!("Called OS llist_free");
+    drop(Box::from_raw(llist.cast::<LinkedList>()));
+}
+unsafe extern "C" fn llist_init(llist: *mut core::ffi::c_void) {
+    // trace!("Called OS llist_init");
+    *llist.cast::<LinkedList>() = LinkedList {
+        head: null_mut(),
+        tail: null_mut(),
+        len: 0,
+    };
 }
 unsafe extern "C" fn llist_add_node_tail(
     llist: *mut core::ffi::c_void,
     llist_node: *mut core::ffi::c_void,
 ) {
     trace!("Called OS llist_add_node_tail");
-    let list = (*llist.cast::<Option<LinkedList>>()).as_mut().unwrap();
-    (*list.tail).next = llist_node.cast();
-    list.tail = llist_node.cast();
-    list.len += 1;
+
+    if (*llist.cast::<LinkedList>()).head.is_null() {
+        llist_add_node_head(llist, llist_node);
+        return;
+    }
+
+    (*(*llist.cast::<LinkedList>()).tail).next = llist_node.cast();
+    (*llist.cast::<LinkedList>()).tail = llist_node.cast();
+    (*llist.cast::<LinkedList>()).len += 1;
 }
 unsafe extern "C" fn llist_add_node_head(
     llist: *mut core::ffi::c_void,
     llist_node: *mut core::ffi::c_void,
 ) {
     trace!("Called OS llist_add_node_head");
-    let list = (*llist.cast::<Option<LinkedList>>()).as_mut().unwrap();
-    (*llist_node.cast::<LinkedListNode>()).next = list.head.cast();
-    list.head = llist_node.cast();
-    list.len += 1;
+
+    (*llist_node.cast::<LinkedListNode>()).next = (*llist.cast::<LinkedList>()).head.cast();
+    (*llist.cast::<LinkedList>()).head = llist_node.cast();
+    (*llist.cast::<LinkedList>()).len += 1;
 }
 unsafe extern "C" fn llist_get_node_head(llist: *mut core::ffi::c_void) -> *mut core::ffi::c_void {
     trace!("Called OS llist_get_node_head");
-    (*llist.cast::<Option<LinkedList>>())
-        .as_mut()
-        .unwrap()
-        .head
-        .cast()
+    (*llist.cast::<LinkedList>()).head.cast()
 }
 unsafe extern "C" fn llist_get_node_nxt(
     llist: *mut core::ffi::c_void,
@@ -405,79 +453,112 @@ unsafe extern "C" fn llist_del_node(
     llist_node: *mut core::ffi::c_void,
 ) {
     trace!("Called OS llist_del_node");
-    let current = llist_get_node_head(llist);
+    let mut current = llist_get_node_head(llist);
 
     if current.is_null() {
         unreachable!()
+    }
+
+    if llist_get_node_head(llist) == llist_node {
+        (*llist.cast::<LinkedList>()).head = llist_get_node_nxt(llist, llist_node).cast();
+        if (*llist.cast::<LinkedList>()).head.is_null() {
+            (*llist.cast::<LinkedList>()).tail = null_mut();
+        }
+        return;
     }
 
     loop {
         let next = llist_get_node_nxt(llist, current);
 
         if next.is_null() {
-            unreachable!();
+            unreachable!()
         }
 
         if next == llist_node {
             let next_after = llist_get_node_nxt(llist, next);
             (*current.cast::<LinkedListNode>()).next = next_after.cast();
             (*llist.cast::<Option<LinkedList>>()).as_mut().unwrap().len -= 1;
+
+            if (*llist.cast::<LinkedList>()).tail == llist_node.cast() {
+                (*llist.cast::<LinkedList>()).tail = current.cast();
+            }
+
             return;
         }
+
+        current = next;
     }
 }
 unsafe extern "C" fn llist_len(llist: *mut core::ffi::c_void) -> core::ffi::c_uint {
     trace!("Called OS llist_len");
     (*llist.cast::<Option<LinkedList>>()).as_mut().unwrap().len as _
 }
+
+/// Allocate a network buffer of size @size.
 unsafe extern "C" fn nbuf_alloc(size: core::ffi::c_uint) -> *mut core::ffi::c_void {
     trace!("Called OS nbuf_alloc");
-    todo!();
+    Box::into_raw(Box::new(NetworkBuffer::new(size as usize))).cast()
 }
+/// Free a network buffer(@nbuf) which was allocated by @nbuf_alloc.
 unsafe extern "C" fn nbuf_free(nbuf: *mut core::ffi::c_void) {
     trace!("Called OS nbuf_free");
-    todo!();
+    drop(Box::<NetworkBuffer>::from_raw(nbuf.cast()));
 }
+/// Reserve headroom at the beginning of the data area of a network buffer(@nbuf).
 unsafe extern "C" fn nbuf_headroom_res(nbuf: *mut core::ffi::c_void, size: core::ffi::c_uint) {
     trace!("Called OS nbuf_headroom_res");
-    todo!();
+    (*nbuf.cast::<NetworkBuffer>()).reserve_headroom(size as usize);
 }
+/// Get the size of the reserved headroom at the beginning of the data area of a network buffer(@nbuf).
 unsafe extern "C" fn nbuf_headroom_get(nbuf: *mut core::ffi::c_void) -> core::ffi::c_uint {
     trace!("Called OS nbuf_headroom_get");
-    todo!();
+    (*nbuf.cast::<NetworkBuffer>()).headroom() as _
 }
+/// Get the size of the data area of a network buffer(@nbuf).
 unsafe extern "C" fn nbuf_data_size(nbuf: *mut core::ffi::c_void) -> core::ffi::c_uint {
     trace!("Called OS nbuf_data_size");
-    todo!();
+    (*nbuf.cast::<NetworkBuffer>()).len() as _
 }
+// Get the pointer to the data area of a network buffer(@nbuf).
 unsafe extern "C" fn nbuf_data_get(nbuf: *mut core::ffi::c_void) -> *mut core::ffi::c_void {
     trace!("Called OS nbuf_data_get");
-    todo!();
+    (*nbuf.cast::<NetworkBuffer>())
+        .data_mut()
+        .as_mut_ptr()
+        .cast()
 }
+/// Increase the data area of a network buffer(@nbuf) by @size bytes at the end of the area and return the pointer to
+/// the beginning of the data area.
 unsafe extern "C" fn nbuf_data_put(
     nbuf: *mut core::ffi::c_void,
     size: core::ffi::c_uint,
 ) -> *mut core::ffi::c_void {
     trace!("Called OS nbuf_data_put");
-    todo!();
+    (*nbuf.cast::<NetworkBuffer>()).put(size as usize);
+    nbuf_data_get(nbuf)
 }
+/// Increase the data area of a network buffer(@nbuf) by @size bytes at the start of the area and return the pointer to
+/// the beginning of the data area.
 unsafe extern "C" fn nbuf_data_push(
     nbuf: *mut core::ffi::c_void,
     size: core::ffi::c_uint,
 ) -> *mut core::ffi::c_void {
-    trace!("Called OS nbuf_data_push");
-    todo!();
+    (*nbuf.cast::<NetworkBuffer>()).push(size as usize);
+    nbuf_data_get(nbuf)
 }
+/// Decrease the data area of a network buffer(@nbuf) by @size bytes at the start of the area and
+/// return the pointer to the beginning of the data area.
 unsafe extern "C" fn nbuf_data_pull(
     nbuf: *mut core::ffi::c_void,
     size: core::ffi::c_uint,
 ) -> *mut core::ffi::c_void {
-    trace!("Called OS nbuf_data_pull");
-    todo!();
+    (*nbuf.cast::<NetworkBuffer>()).pull(size as usize);
+    nbuf_data_get(nbuf)
 }
+/// Get the priority of a network buffer(@nbuf).
 unsafe extern "C" fn nbuf_get_priority(nbuf: *mut core::ffi::c_void) -> core::ffi::c_uchar {
     trace!("Called OS nbuf_get_priority");
-    todo!();
+    0
 }
 
 unsafe extern "C" fn tasklet_alloc(type_: core::ffi::c_int) -> *mut core::ffi::c_void {
@@ -609,19 +690,18 @@ unsafe extern "C" fn sleep_ms(msecs: core::ffi::c_int) -> core::ffi::c_int {
 unsafe extern "C" fn delay_us(usecs: core::ffi::c_int) -> core::ffi::c_int {
     trace!("Called OS delay_us");
 
-    for _ in 0..usecs {
-        cortex_m::asm::delay(64)
-    }
+    embassy_time::block_for(embassy_time::Duration::from_micros(usecs as _));
 
     0
 }
 unsafe extern "C" fn time_get_curr_us() -> core::ffi::c_ulong {
     trace!("Called OS time_get_curr_us");
-    todo!();
+    embassy_time::Instant::now().as_micros() as _
 }
 unsafe extern "C" fn time_elapsed_us(start_time_us: core::ffi::c_ulong) -> core::ffi::c_uint {
     trace!("Called OS time_elapsed_us");
-    todo!();
+    delay_us(10000); // TODO remove
+    time_get_curr_us() - start_time_us
 }
 unsafe extern "C" fn bus_pcie_init(
     dev_name: *const core::ffi::c_char,
@@ -743,32 +823,57 @@ unsafe extern "C" fn bus_qspi_dev_host_map_get(
     trace!("Called OS bus_qspi_dev_host_map_get");
     todo!();
 }
+
+struct SpiBus {
+    dummy: u32,
+}
+
+struct SpiDevice {
+    device_object: BusDeviceObject,
+    os_context: *mut OsContext,
+}
+
+unsafe fn get_os_context(ptr: *mut nrf_wifi_bus_spi_dev_ctx) -> *mut OsContext {
+    let bal_dev_ctx = (*ptr).bal_dev_ctx.cast::<nrf_wifi_bal_dev_ctx>();
+    let hal_dev_ctx = (*bal_dev_ctx).hal_dev_ctx.cast::<nrf_wifi_hal_dev_ctx>();
+    let fmac_dec_ctx = (*hal_dev_ctx).mac_dev_ctx.cast::<nrf_wifi_fmac_dev_ctx>();
+    (*fmac_dec_ctx).os_dev_ctx.cast::<OsContext>()
+}
+
 unsafe extern "C" fn bus_spi_init() -> *mut core::ffi::c_void {
     trace!("Called OS bus_spi_init");
-    todo!();
+    Box::into_raw(Box::new(SpiBus { dummy: 0 })).cast()
 }
 unsafe extern "C" fn bus_spi_deinit(os_spi_priv: *mut core::ffi::c_void) {
     trace!("Called OS bus_spi_deinit");
-    todo!();
+    drop(Box::from_raw(os_spi_priv));
 }
 unsafe extern "C" fn bus_spi_dev_add(
     spi_priv: *mut core::ffi::c_void,
     osal_spi_dev_ctx: *mut core::ffi::c_void,
 ) -> *mut core::ffi::c_void {
-    trace!("Called OS bus_spi_dev_add");
-    todo!();
+    trace!("Called OS bus_spi_dev_add: {}", osal_spi_dev_ctx);
+
+    let _spi_priv = spi_priv.cast::<SpiBus>();
+    let osal_spi_dev_ctx = osal_spi_dev_ctx.cast::<nrf_wifi_bus_spi_dev_ctx>();
+
+    Box::into_raw(Box::new(SpiDevice {
+        device_object: (*get_os_context(osal_spi_dev_ctx)).bus,
+        os_context: get_os_context(osal_spi_dev_ctx),
+    }))
+    .cast()
 }
 unsafe extern "C" fn bus_spi_dev_rem(os_spi_dev_ctx: *mut core::ffi::c_void) {
     trace!("Called OS bus_spi_dev_rem");
-    todo!();
+
+    drop(Box::from_raw(os_spi_dev_ctx.cast::<SpiDevice>()));
 }
 unsafe extern "C" fn bus_spi_dev_init(os_spi_dev_ctx: *mut core::ffi::c_void) -> nrf_wifi_status {
     trace!("Called OS bus_spi_dev_init");
-    todo!();
+    nrf_wifi_status::NRF_WIFI_STATUS_SUCCESS
 }
 unsafe extern "C" fn bus_spi_dev_deinit(os_spi_dev_ctx: *mut core::ffi::c_void) {
     trace!("Called OS bus_spi_dev_deinit");
-    todo!();
 }
 unsafe extern "C" fn bus_spi_dev_intr_reg(
     os_spi_dev_ctx: *mut core::ffi::c_void,
@@ -777,19 +882,35 @@ unsafe extern "C" fn bus_spi_dev_intr_reg(
         unsafe extern "C" fn(callbk_data: *mut core::ffi::c_void) -> core::ffi::c_int,
     >,
 ) -> nrf_wifi_status {
-    trace!("Called OS bus_spi_dev_intr_reg");
-    todo!();
+    trace!("Called OS bus_spi_dev_intr_reg: {}", os_spi_dev_ctx);
+
+    let os_ctx = (*os_spi_dev_ctx.cast::<SpiDevice>()).os_context;
+
+    critical_section::with(|cs| {
+        *(*os_ctx).bus_interrupt.borrow_ref_mut(cs) = Some(crate::BusInterrupt {
+            interrupt_data: callbk_data,
+            interrupt_callback: callback_fn.unwrap(),
+        });
+    });
+
+    nrf_wifi_status::NRF_WIFI_STATUS_SUCCESS
 }
 unsafe extern "C" fn bus_spi_dev_intr_unreg(os_spi_dev_ctx: *mut core::ffi::c_void) {
     trace!("Called OS bus_spi_dev_intr_unreg");
-    todo!();
+
+    let os_ctx = (*os_spi_dev_ctx.cast::<SpiDevice>()).os_context;
+
+    critical_section::with(|cs| {
+        *(*os_ctx).bus_interrupt.borrow_ref_mut(cs) = None;
+    });
 }
 unsafe extern "C" fn bus_spi_dev_host_map_get(
     os_spi_dev_ctx: *mut core::ffi::c_void,
     host_map: *mut nrf_wifi_osal_host_map,
 ) {
     trace!("Called OS bus_spi_dev_host_map_get");
-    todo!();
+    (*host_map).addr = 0;
+    (*host_map).size = 0;
 }
 unsafe extern "C" fn assert(
     test_val: core::ffi::c_int,
@@ -889,4 +1010,62 @@ extern "C" {
     fn c_log_dbg(fmt: *const core::ffi::c_char, args: nrf700x_sys::va_list) -> core::ffi::c_int;
     fn c_log_info(fmt: *const core::ffi::c_char, args: nrf700x_sys::va_list) -> core::ffi::c_int;
     fn c_log_err(fmt: *const core::ffi::c_char, args: nrf700x_sys::va_list) -> core::ffi::c_int;
+}
+
+struct NetworkBuffer {
+    buffer: Vec<u8>,
+    start: usize,
+    end: usize,
+}
+
+impl NetworkBuffer {
+    pub fn new(size: usize) -> Self {
+        Self {
+            buffer: alloc::vec![0; size],
+            start: 0,
+            end: 0,
+        }
+    }
+
+    pub fn len(&self) -> usize {
+        self.end - self.start
+    }
+
+    pub fn headroom(&self) -> usize {
+        self.start
+    }
+
+    pub fn reserve_headroom(&mut self, size: usize) {
+        if self.len() == 0 {
+            self.start = size;
+            self.end = size;
+        } else {
+            if self.start < size {
+                let len = self.len();
+
+                self.buffer
+                    .as_mut_slice()
+                    .copy_within(self.start..self.end, size);
+
+                self.start = size;
+                self.end = size + len;
+            }
+        }
+    }
+
+    pub fn data_mut(&mut self) -> &mut [u8] {
+        &mut self.buffer[self.start..self.end]
+    }
+
+    pub fn put(&mut self, amount: usize) {
+        self.end += amount;
+    }
+
+    pub fn push(&mut self, amount: usize) {
+        self.start = self.start.checked_sub(amount).unwrap();
+    }
+
+    pub fn pull(&mut self, amount: usize) {
+        self.start += amount;
+    }
 }
