@@ -249,17 +249,27 @@ unsafe extern "C" fn spi_read_reg32(
     priv_: *mut core::ffi::c_void,
     addr: core::ffi::c_ulong,
 ) -> core::ffi::c_uint {
-    trace!("Called OS spi_read_reg32: {}", priv_);
     let mut buffer = [0; 4];
     (*(*priv_.cast::<SpiDevice>()).device_object).read(addr, &mut buffer);
-    u32::from_le_bytes(buffer)
+    let value = u32::from_le_bytes(buffer);
+    trace!(
+        "Called OS spi_read_reg32: addr={:08X} value={:08X}",
+        addr,
+        value
+    );
+
+    value
 }
 unsafe extern "C" fn spi_write_reg32(
     priv_: *mut core::ffi::c_void,
     addr: core::ffi::c_ulong,
     val: core::ffi::c_uint,
 ) {
-    trace!("Called OS spi_write_reg32");
+    trace!(
+        "Called OS spi_write_reg32: addr={:08X} value={:08X}",
+        addr,
+        val
+    );
     (*(*priv_.cast::<SpiDevice>()).device_object).write(addr, &val.to_le_bytes());
 }
 unsafe extern "C" fn spi_cpy_from(
@@ -275,7 +285,7 @@ unsafe extern "C" fn spi_cpy_from(
 
     defmt::flush();
     trace!(
-        "Called OS spi_cpy_from {:08X} len={:08X} buf={:02X}",
+        "Called OS spi_cpy_from {:08X} len={} buf={:02X}",
         addr,
         count,
         core::slice::from_raw_parts_mut(dest.cast::<u8>(), count)
@@ -288,7 +298,14 @@ unsafe extern "C" fn spi_cpy_to(
     src: *const core::ffi::c_void,
     count: usize,
 ) {
-    trace!("Called OS spi_cpy_to {:X} (len: {})", addr, count);
+    defmt::flush();
+    trace!(
+        "Called OS spi_cpy_to {:08X} len={} buf={:02X})",
+        addr,
+        count,
+        core::slice::from_raw_parts(src.cast::<u8>(), count)
+    );
+    defmt::flush();
 
     (*(*priv_.cast::<SpiDevice>()).device_object)
         .write(addr as u32, core::slice::from_raw_parts(src.cast(), count));
@@ -679,28 +696,26 @@ unsafe extern "C" fn tasklet_kill(tasklet: *mut core::ffi::c_void) {
 }
 
 unsafe extern "C" fn sleep_ms(msecs: core::ffi::c_int) -> core::ffi::c_int {
-    trace!("Called OS sleep_ms");
+    // trace!("Called OS sleep_ms");
 
-    for _ in 0..msecs {
-        cortex_m::asm::delay(64_000)
-    }
+    embassy_time::block_for(embassy_time::Duration::from_millis(msecs as _));
 
     0
 }
 unsafe extern "C" fn delay_us(usecs: core::ffi::c_int) -> core::ffi::c_int {
-    trace!("Called OS delay_us");
+    // trace!("Called OS delay_us");
 
     embassy_time::block_for(embassy_time::Duration::from_micros(usecs as _));
 
     0
 }
 unsafe extern "C" fn time_get_curr_us() -> core::ffi::c_ulong {
-    trace!("Called OS time_get_curr_us");
+    // trace!("Called OS time_get_curr_us");
     embassy_time::Instant::now().as_micros() as _
 }
 unsafe extern "C" fn time_elapsed_us(start_time_us: core::ffi::c_ulong) -> core::ffi::c_uint {
-    trace!("Called OS time_elapsed_us");
-    delay_us(10000); // TODO remove
+    // trace!("Called OS time_elapsed_us");
+    sleep_ms(10);
     time_get_curr_us() - start_time_us
 }
 unsafe extern "C" fn bus_pcie_init(

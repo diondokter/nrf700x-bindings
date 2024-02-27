@@ -41,7 +41,9 @@ async fn interrupt_watcher(
     mut host_irq: Input<'static, AnyPin>,
 ) -> ! {
     loop {
+        defmt::debug!("Waiting for interrupt!");
         host_irq.wait_for_high().await;
+        // embassy_time::Timer::after_millis(100).await;
         defmt::debug!("Interrupt!");
 
         if let Some(irq) = critical_section::with(|cs| bus_interrupt.borrow_ref_mut(cs).clone()) {

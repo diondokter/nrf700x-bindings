@@ -24,7 +24,7 @@ impl<T: SpiDevice> BusDevice for T {
                 addr as u8,
                 0x00,
             ]),
-            Operation::Read(&mut [0; 8][..(regions::get_latency_for_address(addr) * 4) as usize]),
+            // Operation::Read(&mut [0; 8][..(regions::get_latency_for_address(addr) * 4) as usize]),
             Operation::Read(buf),
         ])
         .unwrap()
